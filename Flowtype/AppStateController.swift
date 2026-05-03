@@ -52,7 +52,7 @@ final class AppStateController: ObservableObject {
     init(
         settingsStore: SettingsStore = SettingsStore(),
         audio: AudioCapturing = AudioCaptureService(),
-        transcriber: Transcribing = WhisperKitTranscriptionService(),
+        transcriber: Transcribing = DefaultTranscriptionService(),
         pasteService: Pasting = PasteService(),
         localStore: LocalStore? = nil,
         hotKeys: HotKeyService = HotKeyService()
@@ -116,13 +116,24 @@ final class AppStateController: ObservableObject {
     func refreshModelStatus(for settingsOverride: AppSettings? = nil) {
         let targetSettings = settingsOverride ?? settings
         modelStatus = transcriber.modelStatus(settings: targetSettings)
-        modelDownloadMessage = modelStatus.isDownloaded
-            ? "Model is downloaded and ready."
-            : "Model is not downloaded yet. It will download automatically on the next dictation."
+        switch targetSettings.transcriptionProvider {
+        case .local:
+            modelDownloadMessage = modelStatus.isDownloaded
+                ? "Model is downloaded and ready."
+                : "Model is not downloaded yet. It will download automatically on the next dictation."
+        case .groq:
+            modelDownloadMessage = modelStatus.isDownloaded
+                ? "Groq is configured and ready."
+                : "Groq is selected. Add a Groq API key before dictating."
+        }
     }
 
     func downloadModel(for targetSettings: AppSettings) {
         guard !isDownloadingModel else { return }
+        guard targetSettings.transcriptionProvider == .local else {
+            refreshModelStatus(for: targetSettings)
+            return
+        }
         isDownloadingModel = true
         modelDownloadMessage = "Downloading model..."
         Task {

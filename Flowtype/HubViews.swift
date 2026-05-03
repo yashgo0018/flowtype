@@ -354,7 +354,19 @@ struct SettingsPage: View {
 
                 Form {
                     Section("Transcription") {
-                        TextField("Whisper model", text: $draft.transcriptionModel)
+                        Picker("Provider", selection: $draft.transcriptionProvider) {
+                            Text("Local WhisperKit").tag(TranscriptionProvider.local)
+                            Text("Groq").tag(TranscriptionProvider.groq)
+                        }
+                        if draft.transcriptionProvider == .local {
+                            TextField("Whisper model", text: $draft.transcriptionModel)
+                        } else {
+                            LabeledContent("Groq model") {
+                                Text(AppSettings.groqTranscriptionModel)
+                                    .textSelection(.enabled)
+                            }
+                            SecureField("Groq API key", text: $draft.groqAPIKey)
+                        }
                         LabeledContent("Language") {
                             Text("English")
                                 .foregroundStyle(.secondary)
@@ -396,6 +408,12 @@ struct SettingsPage: View {
         .onChange(of: draft.transcriptionModel) {
             controller.refreshModelStatus(for: draft)
         }
+        .onChange(of: draft.transcriptionProvider) {
+            controller.refreshModelStatus(for: draft)
+        }
+        .onChange(of: draft.groqAPIKey) {
+            controller.refreshModelStatus(for: draft)
+        }
     }
 }
 
@@ -404,8 +422,8 @@ struct ModelDownloadSection: View {
     @Binding var draft: AppSettings
 
     var body: some View {
-        Section("Local model") {
-            LabeledContent("Resolved model") {
+        Section(draft.transcriptionProvider == .local ? "Local model" : "Groq") {
+            LabeledContent(draft.transcriptionProvider == .local ? "Resolved model" : "Selected model") {
                 Text(controller.modelStatus.modelName)
                     .textSelection(.enabled)
             }
@@ -414,7 +432,7 @@ struct ModelDownloadSection: View {
                     Circle()
                         .fill(controller.modelStatus.isDownloaded ? Color.green : Color.orange)
                         .frame(width: 8, height: 8)
-                    Text(controller.modelStatus.isDownloaded ? "Downloaded" : "Will download on next dictation")
+                    Text(statusText)
                         .foregroundStyle(controller.modelStatus.isDownloaded ? .primary : .secondary)
                 }
             }
@@ -436,19 +454,30 @@ struct ModelDownloadSection: View {
                     controller.refreshModelStatus(for: draft)
                 }
                 Spacer()
-                Button {
-                    controller.downloadModel(for: draft)
-                } label: {
-                    if controller.isDownloadingModel {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Downloading...")
-                    } else {
-                        Text("Download model")
+                if draft.transcriptionProvider == .local {
+                    Button {
+                        controller.downloadModel(for: draft)
+                    } label: {
+                        if controller.isDownloadingModel {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Downloading...")
+                        } else {
+                            Text("Download model")
+                        }
                     }
+                    .disabled(controller.modelStatus.isDownloaded || controller.isDownloadingModel)
                 }
-                .disabled(controller.modelStatus.isDownloaded || controller.isDownloadingModel)
             }
+        }
+    }
+
+    private var statusText: String {
+        switch draft.transcriptionProvider {
+        case .local:
+            controller.modelStatus.isDownloaded ? "Downloaded" : "Will download on next dictation"
+        case .groq:
+            controller.modelStatus.isDownloaded ? "API key configured" : "API key required"
         }
     }
 }

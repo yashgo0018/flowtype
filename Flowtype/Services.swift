@@ -52,6 +52,47 @@ protocol Pasting {
     func paste(_ text: String, restoreClipboard: Bool, target: PasteTarget?) -> PasteOutcome
 }
 
+@MainActor
+final class DefaultTranscriptionService: Transcribing {
+    private let localService: WhisperKitTranscriptionService
+    private let groqService: GroqTranscriptionService
+
+    init(
+        localService: WhisperKitTranscriptionService = WhisperKitTranscriptionService(),
+        groqService: GroqTranscriptionService = GroqTranscriptionService()
+    ) {
+        self.localService = localService
+        self.groqService = groqService
+    }
+
+    func transcribe(audioURL: URL, settings: AppSettings) async throws -> String {
+        switch settings.transcriptionProvider {
+        case .local:
+            try await localService.transcribe(audioURL: audioURL, settings: settings)
+        case .groq:
+            try await groqService.transcribe(audioURL: audioURL, settings: settings)
+        }
+    }
+
+    func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
+        switch settings.transcriptionProvider {
+        case .local:
+            localService.modelStatus(settings: settings)
+        case .groq:
+            groqService.modelStatus(settings: settings)
+        }
+    }
+
+    func downloadModel(settings: AppSettings) async throws -> TranscriptionModelStatus {
+        switch settings.transcriptionProvider {
+        case .local:
+            try await localService.downloadModel(settings: settings)
+        case .groq:
+            try await groqService.downloadModel(settings: settings)
+        }
+    }
+}
+
 final class AudioCaptureService: AudioCapturing {
     private let engine = AVAudioEngine()
     private var audioFile: AVAudioFile?
@@ -252,6 +293,142 @@ final class WhisperKitTranscriptionService: Transcribing {
     private func cleanTranscript(_ text: String) -> String {
         text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+@MainActor
+final class GroqTranscriptionService: Transcribing {
+    private let endpoint = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
+    private let session: URLSession
+
+    init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    func transcribe(audioURL: URL, settings: AppSettings) async throws -> String {
+        let apiKey = settings.groqAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !apiKey.isEmpty else {
+            throw GroqTranscriptionError.missingAPIKey
+        }
+
+        var request = URLRequest(url: endpoint)
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try multipartBody(audioURL: audioURL, boundary: boundary)
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw GroqTranscriptionError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            throw GroqTranscriptionError.apiError(statusCode: httpResponse.statusCode, message: errorMessage(from: data))
+        }
+
+        let transcription = try JSONDecoder().decode(GroqTranscriptionResponse.self, from: data)
+        return cleanTranscript(transcription.text)
+    }
+
+    func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
+        let hasAPIKey = !settings.groqAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return TranscriptionModelStatus(
+            modelName: AppSettings.groqTranscriptionModel,
+            isDownloaded: hasAPIKey,
+            localPath: nil
+        )
+    }
+
+    func downloadModel(settings: AppSettings) async throws -> TranscriptionModelStatus {
+        modelStatus(settings: settings)
+    }
+
+    private func multipartBody(audioURL: URL, boundary: String) throws -> Data {
+        var body = Data()
+        appendField(name: "model", value: AppSettings.groqTranscriptionModel, to: &body, boundary: boundary)
+        appendField(name: "response_format", value: "json", to: &body, boundary: boundary)
+        appendField(name: "language", value: "en", to: &body, boundary: boundary)
+        appendField(name: "temperature", value: "0", to: &body, boundary: boundary)
+
+        let audioData = try Data(contentsOf: audioURL)
+        body.append("--\(boundary)\r\n".utf8Data)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(audioURL.lastPathComponent)\"\r\n".utf8Data)
+        body.append("Content-Type: \(mimeType(for: audioURL))\r\n\r\n".utf8Data)
+        body.append(audioData)
+        body.append("\r\n--\(boundary)--\r\n".utf8Data)
+        return body
+    }
+
+    private func appendField(name: String, value: String, to body: inout Data, boundary: String) {
+        body.append("--\(boundary)\r\n".utf8Data)
+        body.append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8Data)
+        body.append("\(value)\r\n".utf8Data)
+    }
+
+    private func mimeType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "flac":
+            "audio/flac"
+        case "mp3", "mpeg", "mpga":
+            "audio/mpeg"
+        case "m4a", "mp4":
+            "audio/mp4"
+        case "ogg":
+            "audio/ogg"
+        case "webm":
+            "audio/webm"
+        default:
+            "audio/wav"
+        }
+    }
+
+    private func errorMessage(from data: Data) -> String {
+        if let response = try? JSONDecoder().decode(GroqErrorResponse.self, from: data),
+           let message = response.error?.message,
+           !message.isEmpty {
+            return message
+        }
+        return String(data: data, encoding: .utf8) ?? "Unknown Groq API error."
+    }
+
+    private func cleanTranscript(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct GroqTranscriptionResponse: Decodable {
+    let text: String
+}
+
+private struct GroqErrorResponse: Decodable {
+    struct APIError: Decodable {
+        let message: String?
+    }
+
+    let error: APIError?
+}
+
+private enum GroqTranscriptionError: LocalizedError {
+    case missingAPIKey
+    case invalidResponse
+    case apiError(statusCode: Int, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            "Groq is selected, but no Groq API key is configured."
+        case .invalidResponse:
+            "Groq returned an invalid response."
+        case .apiError(let statusCode, let message):
+            "Groq API error \(statusCode): \(message)"
+        }
+    }
+}
+
+private extension String {
+    var utf8Data: Data {
+        Data(utf8)
     }
 }
 

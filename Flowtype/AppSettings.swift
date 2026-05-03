@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 enum RetentionPolicy: String, CaseIterable, Identifiable, Sendable {
     case normal
@@ -15,8 +16,16 @@ enum FlowBarPosition: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
+enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
+    case local
+    case groq
+
+    var id: String { rawValue }
+}
+
 struct AppSettings: Equatable, Sendable {
     static let defaultTranscriptionModel = "openai_whisper-small.en"
+    static let groqTranscriptionModel = "whisper-large-v3-turbo"
 
     var toggleShortcut: String
     var holdShortcut: String
@@ -24,7 +33,9 @@ struct AppSettings: Equatable, Sendable {
     var pasteLastShortcut: String
     var scratchpadShortcut: String
     var commandModeShortcut: String
+    var transcriptionProvider: TranscriptionProvider
     var transcriptionModel: String
+    var groqAPIKey: String
     var transcriptionLanguage: String
     var flowBarPosition: FlowBarPosition
     var restoreClipboardAfterPaste: Bool
@@ -39,7 +50,9 @@ struct AppSettings: Equatable, Sendable {
         pasteLastShortcut: "cmd+ctrl+v",
         scratchpadShortcut: "option+s",
         commandModeShortcut: "cmd+shift+space",
+        transcriptionProvider: .local,
         transcriptionModel: defaultTranscriptionModel,
+        groqAPIKey: "",
         transcriptionLanguage: "en",
         flowBarPosition: .bottomRight,
         restoreClipboardAfterPaste: true,
@@ -69,6 +82,7 @@ final class SettingsStore {
         static let pasteLastShortcut = "shortcut.pasteLast"
         static let scratchpadShortcut = "shortcut.scratchpad"
         static let commandModeShortcut = "shortcut.commandMode"
+        static let transcriptionProvider = "transcription.provider"
         static let transcriptionModel = "transcription.model"
         static let transcriptionLanguage = "transcription.language"
         static let flowBarPosition = "flowBar.position"
@@ -79,9 +93,11 @@ final class SettingsStore {
     }
 
     private let defaults: UserDefaults
+    private let apiKeyStore: GroqAPIKeyStoring
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = .standard, apiKeyStore: GroqAPIKeyStoring = KeychainGroqAPIKeyStore()) {
         self.defaults = defaults
+        self.apiKeyStore = apiKeyStore
         registerDefaults()
     }
 
@@ -94,7 +110,9 @@ final class SettingsStore {
             pasteLastShortcut: defaults.string(forKey: Key.pasteLastShortcut) ?? fallback.pasteLastShortcut,
             scratchpadShortcut: defaults.string(forKey: Key.scratchpadShortcut) ?? fallback.scratchpadShortcut,
             commandModeShortcut: defaults.string(forKey: Key.commandModeShortcut) ?? fallback.commandModeShortcut,
+            transcriptionProvider: TranscriptionProvider(rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? "") ?? fallback.transcriptionProvider,
             transcriptionModel: normalizeTranscriptionModel(defaults.string(forKey: Key.transcriptionModel) ?? fallback.transcriptionModel),
+            groqAPIKey: apiKeyStore.loadAPIKey(),
             transcriptionLanguage: "en",
             flowBarPosition: FlowBarPosition(rawValue: defaults.string(forKey: Key.flowBarPosition) ?? "") ?? fallback.flowBarPosition,
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
@@ -111,7 +129,9 @@ final class SettingsStore {
         defaults.set(settings.pasteLastShortcut, forKey: Key.pasteLastShortcut)
         defaults.set(settings.scratchpadShortcut, forKey: Key.scratchpadShortcut)
         defaults.set(settings.commandModeShortcut, forKey: Key.commandModeShortcut)
+        defaults.set(settings.transcriptionProvider.rawValue, forKey: Key.transcriptionProvider)
         defaults.set(normalizeTranscriptionModel(settings.transcriptionModel), forKey: Key.transcriptionModel)
+        apiKeyStore.saveAPIKey(settings.groqAPIKey)
         defaults.set("en", forKey: Key.transcriptionLanguage)
         defaults.set(settings.flowBarPosition.rawValue, forKey: Key.flowBarPosition)
         defaults.set(settings.restoreClipboardAfterPaste, forKey: Key.restoreClipboardAfterPaste)
@@ -129,6 +149,7 @@ final class SettingsStore {
             Key.pasteLastShortcut: fallback.pasteLastShortcut,
             Key.scratchpadShortcut: fallback.scratchpadShortcut,
             Key.commandModeShortcut: fallback.commandModeShortcut,
+            Key.transcriptionProvider: fallback.transcriptionProvider.rawValue,
             Key.transcriptionModel: fallback.transcriptionModel,
             Key.transcriptionLanguage: "en",
             Key.flowBarPosition: fallback.flowBarPosition.rawValue,
@@ -152,5 +173,75 @@ final class SettingsStore {
             return trimmed
         }
         return AppSettings.defaultTranscriptionModel
+    }
+}
+
+protocol GroqAPIKeyStoring {
+    func loadAPIKey() -> String
+    func saveAPIKey(_ apiKey: String)
+}
+
+final class KeychainGroqAPIKeyStore: GroqAPIKeyStoring {
+    private let service = "com.yashgoyal.Flowtype"
+    private let account = "groq-api-key"
+
+    func loadAPIKey() -> String {
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(baseQuery(returnData: true), &item)
+        guard status == errSecSuccess, let data = item as? Data else {
+            return ""
+        }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    func saveAPIKey(_ apiKey: String) {
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = baseQuery(returnData: false)
+        guard !trimmed.isEmpty else {
+            SecItemDelete(query)
+            return
+        }
+
+        let data = Data(trimmed.utf8)
+        let updateStatus = SecItemUpdate(query, [kSecValueData as String: data] as CFDictionary)
+        if updateStatus == errSecItemNotFound {
+            var addQuery = baseQueryDictionary()
+            addQuery[kSecValueData as String] = data
+            SecItemAdd(addQuery as CFDictionary, nil)
+        }
+    }
+
+    private func baseQuery(returnData: Bool) -> CFDictionary {
+        var query = baseQueryDictionary()
+        if returnData {
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+        }
+        return query as CFDictionary
+    }
+
+    private func baseQueryDictionary() -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+    }
+}
+
+final class UserDefaultsGroqAPIKeyStore: GroqAPIKeyStoring {
+    private let defaults: UserDefaults
+    private let key = "transcription.groq.apiKey"
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    func loadAPIKey() -> String {
+        defaults.string(forKey: key) ?? ""
+    }
+
+    func saveAPIKey(_ apiKey: String) {
+        defaults.set(apiKey.trimmingCharacters(in: .whitespacesAndNewlines), forKey: key)
     }
 }

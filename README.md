@@ -22,6 +22,6 @@ xcodebuild test -project Flowtype.xcodeproj -scheme Flowtype -configuration Debu
 
 - Target: Apple Silicon, macOS 14+.
 - Bundle ID: `com.yashgoyal.Flowtype`.
-- Transcription: local WhisperKit with default model `openai_whisper-small.en`.
-- Storage: SwiftData and UserDefaults under the native app, with no Python data migration.
+- Transcription: local WhisperKit with default model `openai_whisper-small.en`, or Groq with `whisper-large-v3-turbo` when Groq is selected and an API key is configured.
+- Storage: SwiftData, UserDefaults, and Keychain under the native app, with no Python data migration.
 - Permissions: microphone for recording and Accessibility for global shortcuts/paste.
