@@ -37,7 +37,7 @@ struct HubRootView: View {
                 }
                 .scrollContentBackground(.hidden)
 
-                Text("v0.1 - Native build")
+                Text("Local dictation")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(12)
@@ -74,7 +74,6 @@ struct HubRootView: View {
 struct HomePage: View {
     @EnvironmentObject private var controller: AppStateController
     @Query(sort: \TranscriptHistoryItem.createdAt, order: .reverse) private var history: [TranscriptHistoryItem]
-    @Query private var usage: [DailyUsage]
 
     var body: some View {
         PageContainer(title: "Good day. Ready when you are.") {
@@ -118,7 +117,7 @@ struct ActivityPage: View {
                     for item in history {
                         context.delete(item)
                     }
-                    try? context.save()
+                    saveContext(context)
                 }
             }
             if filtered.isEmpty {
@@ -159,7 +158,7 @@ struct InsightsPage: View {
                 InfoCard(title: "Desktop usage", body: "Pasted \(history.filter(\.pasted).count) - Copied \(history.filter { !$0.pasted }.count)")
                 InfoCard(title: "Usage heatmap", body: usage.sorted { $0.day > $1.day }.prefix(42).map { $0.words > 0 ? "■" : "□" }.joined(separator: " "))
             } else {
-                EmptyState(title: "Leaderboard locked", body: "Team rankings require account, sync, and backend support.")
+                EmptyState(title: "No leaderboard available", body: "Usage insights are currently limited to this Mac.")
             }
         }
     }
@@ -198,7 +197,7 @@ struct DictionaryPage: View {
 
     var body: some View {
         PageContainer(title: "Dictionary") {
-            InfoCard(title: "Teach Flow your words", body: "Pinned and high-use entries appear first. Auto-add is a future toggle.")
+            InfoCard(title: "Teach Flow your words", body: "Add words and corrections you want Flowtype to recognize consistently.")
             HStack {
                 TextField("Search dictionary", text: $query).textFieldStyle(.roundedBorder)
                 TextField("Phrase", text: $phrase).textFieldStyle(.roundedBorder)
@@ -207,7 +206,7 @@ struct DictionaryPage: View {
                     context.insert(DictionaryEntry(phrase: phrase, replacement: replacement))
                     phrase = ""
                     replacement = ""
-                    try? context.save()
+                    saveContext(context)
                 }
                 .disabled(phrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -229,7 +228,7 @@ struct SnippetsPage: View {
 
     var body: some View {
         PageContainer(title: "Snippets") {
-            InfoCard(title: "Say it once", body: "Voice triggers expand into saved text blocks. Team snippets are placeholders locally.")
+            InfoCard(title: "Say it once", body: "Voice triggers expand into saved text blocks stored on this Mac.")
             HStack {
                 TextField("Trigger", text: $trigger).textFieldStyle(.roundedBorder)
                 TextField("Expansion", text: $expansion).textFieldStyle(.roundedBorder)
@@ -237,7 +236,7 @@ struct SnippetsPage: View {
                     context.insert(Snippet(trigger: trigger, expansion: expansion))
                     trigger = ""
                     expansion = ""
-                    try? context.save()
+                    saveContext(context)
                 }
                 .disabled(trigger.isEmpty || expansion.isEmpty)
             }
@@ -253,23 +252,24 @@ struct SnippetsPage: View {
 
 struct StylesPage: View {
     @EnvironmentObject private var controller: AppStateController
-    @State private var category = "personal"
+    @State private var category = WritingStyleScope.personal
 
-    private let categories = ["personal", "work", "email", "other"]
     private let styles = ["Formal", "Casual", "Very Casual", "Excited"]
 
     var body: some View {
         PageContainer(title: "Styles") {
-            InfoCard(title: "English-only personalization", body: "Styles shape tone by app category. Context-aware app detection is represented locally.")
+            InfoCard(title: "English-only personalization", body: "Choose a tone preference for each app category.")
             Picker("Category", selection: $category) {
-                ForEach(categories, id: \.self) { Text($0.capitalized).tag($0) }
+                ForEach(WritingStyleScope.allCases) { scope in
+                    Text(scope.rawValue.capitalized).tag(scope)
+                }
             }
             .pickerStyle(.segmented)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220))], spacing: 12) {
                 ForEach(styles, id: \.self) { style in
                     Button {
                         var next = controller.settings
-                        next.stylePreferences[category] = style
+                        next.stylePreferences[category.rawValue] = style
                         controller.saveSettings(next)
                     } label: {
                         VStack(alignment: .leading, spacing: 8) {
@@ -293,7 +293,7 @@ struct ScratchpadPage: View {
 
     var body: some View {
         PageContainer(title: "Scratchpad") {
-            InfoCard(title: "Quick notes", body: "Rich text, tabs, versions, and transforms are represented as a local shell.")
+            InfoCard(title: "Quick notes", body: "Capture drafts and notes locally while dictating.")
             HStack(alignment: .top, spacing: 16) {
                 List(notes) { note in
                     VStack(alignment: .leading) {
@@ -318,7 +318,7 @@ struct ScratchpadPage: View {
                             context.insert(ScratchpadNote(title: title, body: bodyText))
                             title = ""
                             bodyText = ""
-                            try? context.save()
+                            saveContext(context)
                         }
                     }
                 }
@@ -387,7 +387,7 @@ struct SettingsPage: View {
                 .tabItem { Text("Data & Privacy") }
 
                 VStack(alignment: .leading) {
-                    InfoCard(title: "Signed out", body: "Account, plan, team, SSO, and sync are placeholders in this local build.")
+                    InfoCard(title: "Signed out", body: "Account features are unavailable in this local build.")
                     InfoCard(title: "Local data", body: "Transcription history stays on this device and does not sync.")
                 }
                 .padding()
@@ -613,5 +613,13 @@ private func stylePreview(_ style: String) -> String {
         "Thanks! I'll take a look and follow up soon!"
     default:
         ""
+    }
+}
+
+private func saveContext(_ context: ModelContext) {
+    do {
+        try context.save()
+    } catch {
+        NSLog("Flowtype local data save failed: \(error.localizedDescription)")
     }
 }

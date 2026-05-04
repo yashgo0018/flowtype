@@ -3,19 +3,14 @@ import SwiftUI
 
 @MainActor
 final class FlowBarPanelController {
-    var controller: AppStateController {
-        didSet {
-            hostingView.rootView = AnyView(FlowBarView().environmentObject(controller))
-        }
-    }
+    private let controller: AppStateController
 
     private let panel: NSPanel
-    private let hostingView: FlowBarHostingView<AnyView>
 
     init(controller: AppStateController) {
         self.controller = controller
         let rootView = AnyView(FlowBarView().environmentObject(controller))
-        hostingView = FlowBarHostingView(rootView: rootView)
+        let hostingView = FlowBarHostingView(rootView: rootView)
         hostingView.beforeMouseDown = { [weak controller] in
             controller?.preparePasteTargetForFlowBarInteraction()
         }

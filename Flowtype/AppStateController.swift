@@ -69,7 +69,8 @@ final class AppStateController: ObservableObject {
         configureHotKeys()
     }
 
-    func configureHotKeys() {
+    @discardableResult
+    func configureHotKeys() -> Bool {
         hotKeys.onToggle = { [weak self] in
             Task { @MainActor in self?.toggleRecording() }
         }
@@ -84,8 +85,10 @@ final class AppStateController: ObservableObject {
         }
         do {
             try hotKeys.start(settings: settings)
+            return true
         } catch {
             state = .error(error.localizedDescription)
+            return false
         }
     }
 
@@ -108,8 +111,9 @@ final class AppStateController: ObservableObject {
         }
         settings = newSettings
         settingsStore.save(newSettings)
-        configureHotKeys()
+        let hotKeysConfigured = configureHotKeys()
         refreshModelStatus()
+        guard hotKeysConfigured else { return }
         state = .idle("Settings saved")
     }
 
@@ -276,9 +280,12 @@ final class AppStateController: ObservableObject {
     }
 
     private func transcribeAndPaste(_ captured: CapturedAudio) async {
+        defer {
+            removeCapturedAudioFile(captured.url)
+        }
+
         do {
             let transcript = try await transcriber.transcribe(audioURL: captured.url, settings: settings)
-            try? FileManager.default.removeItem(at: captured.url)
             state = .pasting
             let target = pendingPasteTarget
             pendingPasteTarget = nil
@@ -287,17 +294,41 @@ final class AppStateController: ObservableObject {
                 restoreClipboard: settings.restoreClipboardAfterPaste,
                 target: target
             )
-            try? localStore?.saveTranscript(
+            let historyMessage = saveTranscript(transcript, outcome: outcome)
+            state = .idle(historyMessage ?? outcome.message)
+        } catch {
+            pendingPasteTarget = nil
+            state = .error("Transcription failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func saveTranscript(_ transcript: String, outcome: PasteOutcome) -> String? {
+        guard let localStore else {
+            NSLog("Flowtype transcript history skipped: local store is not attached.")
+            return nil
+        }
+
+        do {
+            try localStore.saveTranscript(
                 transcript,
                 pasted: outcome.pasted,
                 statusMessage: outcome.message,
                 retentionPolicy: settings.retentionPolicy
             )
-            state = .idle(outcome.message)
+            return nil
         } catch {
-            try? FileManager.default.removeItem(at: captured.url)
-            pendingPasteTarget = nil
-            state = .error("Transcription failed: \(error.localizedDescription)")
+            NSLog("Flowtype transcript history save failed: \(error.localizedDescription)")
+            return "\(outcome.message) History could not be saved."
+        }
+    }
+
+    private func removeCapturedAudioFile(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            NSLog("Flowtype captured audio cleanup failed for \(url.path): \(error.localizedDescription)")
         }
     }
 }

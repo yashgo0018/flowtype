@@ -15,7 +15,7 @@ final class ShortcutTests: XCTestCase {
         let parsed = try ShortcutParser.parse("esc", allowBareEscape: true)
         XCTAssertEqual(parsed.keyCode, 53)
         XCTAssertTrue(parsed.modifiers.isEmpty)
-        XCTAssertEqual(parsed.display, "Esc")
+        XCTAssertEqual(ShortcutParser.display("esc"), "Esc")
     }
 
     func testCanonicalShortcutNormalizesAliasesAndModifierOrder() {

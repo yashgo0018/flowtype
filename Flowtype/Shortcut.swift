@@ -4,7 +4,6 @@ import Carbon.HIToolbox
 struct ParsedShortcut: Equatable {
     let keyCode: UInt16
     let modifiers: NSEvent.ModifierFlags
-    let display: String
 
     var carbonModifiers: UInt32 {
         var value: UInt32 = 0
@@ -83,7 +82,7 @@ enum ShortcutParser {
             throw ShortcutError.missingModifier(shortcut)
         }
 
-        return ParsedShortcut(keyCode: keyCode, modifiers: modifiers, display: display(shortcut))
+        return ParsedShortcut(keyCode: keyCode, modifiers: modifiers)
     }
 
     static func canonical(_ shortcut: String) -> String {

@@ -16,7 +16,7 @@ struct PasteOutcome: Equatable, Sendable {
     let message: String
 }
 
-struct PasteTarget: @unchecked Sendable {
+struct PasteTarget {
     let processIdentifier: pid_t
     let focusedElement: AXUIElement?
     let role: String?
@@ -112,7 +112,7 @@ final class AudioCaptureService: AudioCapturing {
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             guard let self else { return }
-            try? self.audioFile?.write(from: buffer)
+            self.write(buffer)
             self.peakLevel = max(self.peakLevel, Self.peakLevel(for: buffer))
         }
 
@@ -128,7 +128,7 @@ final class AudioCaptureService: AudioCapturing {
         guard let outputURL else { return nil }
         self.outputURL = nil
         guard peakLevel >= 0.001 else {
-            try? FileManager.default.removeItem(at: outputURL)
+            removeOutputFile(at: outputURL)
             return nil
         }
         return CapturedAudio(url: outputURL, peakLevel: peakLevel)
@@ -141,10 +141,26 @@ final class AudioCaptureService: AudioCapturing {
         }
         audioFile = nil
         if let outputURL {
-            try? FileManager.default.removeItem(at: outputURL)
+            removeOutputFile(at: outputURL)
         }
         outputURL = nil
         peakLevel = 0
+    }
+
+    private func write(_ buffer: AVAudioPCMBuffer) {
+        do {
+            try audioFile?.write(from: buffer)
+        } catch {
+            NSLog("Flowtype audio buffer write failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func removeOutputFile(at url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            NSLog("Flowtype audio cleanup failed for \(url.path): \(error.localizedDescription)")
+        }
     }
 
     private static func peakLevel(for buffer: AVAudioPCMBuffer) -> Float {
@@ -492,7 +508,8 @@ final class PasteService: Pasting {
         var focused: CFTypeRef?
         let focusedElement: AXUIElement?
         if AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-           let focused {
+           let focused,
+           CFGetTypeID(focused) == AXUIElementGetTypeID() {
             focusedElement = (focused as! AXUIElement)
         } else {
             focusedElement = nil
@@ -591,7 +608,8 @@ final class PasteService: Pasting {
         }
 
         var range = CFRange()
-        guard AXValueGetValue((axValue as! AXValue), .cfRange, &range) else {
+        guard CFGetTypeID(axValue) == AXValueGetTypeID(),
+              AXValueGetValue((axValue as! AXValue), .cfRange, &range) else {
             return nil
         }
         return NSRange(location: range.location, length: range.length)
@@ -664,7 +682,16 @@ enum PermissionService {
     }
 }
 
-final class HotKeyService: @unchecked Sendable {
+private struct EventMonitorToken {
+    let rawValue: Any
+
+    func invalidate() {
+        NSEvent.removeMonitor(rawValue)
+    }
+}
+
+@MainActor
+final class HotKeyService {
     var onToggle: (() -> Void)?
     var onHoldStart: (() -> Void)?
     var onHoldStop: (() -> Void)?
@@ -676,8 +703,8 @@ final class HotKeyService: @unchecked Sendable {
     private var carbonHotKey: EventHotKeyRef?
     private var carbonHandler: EventHandlerRef?
     private var carbonCallback: EventHandlerUPP?
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    private var globalMonitor: EventMonitorToken?
+    private var localMonitor: EventMonitorToken?
     private var holdActive = false
     private var lastToggleAt = Date.distantPast
 
@@ -694,11 +721,11 @@ final class HotKeyService: @unchecked Sendable {
         let mask: NSEvent.EventTypeMask = [.keyDown, .keyUp, .flagsChanged]
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
             self?.handle(event)
-        }
+        }.map(EventMonitorToken.init)
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
             self?.handle(event)
             return event
-        }
+        }.map(EventMonitorToken.init)
     }
 
     func stop() {
@@ -711,12 +738,8 @@ final class HotKeyService: @unchecked Sendable {
         carbonHotKey = nil
         carbonHandler = nil
         carbonCallback = nil
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-        }
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-        }
+        globalMonitor?.invalidate()
+        localMonitor?.invalidate()
         globalMonitor = nil
         localMonitor = nil
         holdActive = false

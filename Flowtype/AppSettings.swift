@@ -23,9 +23,30 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
+enum NotificationPreference: String, CaseIterable, Identifiable, Sendable {
+    case tips
+    case errors
+    case pasteBlocked = "paste_blocked"
+    case milestones
+    case formatting
+    case transcriptStatus = "transcript_status"
+
+    var id: String { rawValue }
+}
+
+enum WritingStyleScope: String, CaseIterable, Identifiable, Sendable {
+    case personal
+    case work
+    case email
+    case other
+
+    var id: String { rawValue }
+}
+
 struct AppSettings: Equatable, Sendable {
     static let defaultTranscriptionModel = "openai_whisper-small.en"
     static let groqTranscriptionModel = "whisper-large-v3-turbo"
+    static let defaultTranscriptionLanguage = "en"
 
     var toggleShortcut: String
     var holdShortcut: String
@@ -53,24 +74,14 @@ struct AppSettings: Equatable, Sendable {
         transcriptionProvider: .local,
         transcriptionModel: defaultTranscriptionModel,
         groqAPIKey: "",
-        transcriptionLanguage: "en",
+        transcriptionLanguage: defaultTranscriptionLanguage,
         flowBarPosition: .bottomRight,
         restoreClipboardAfterPaste: true,
         retentionPolicy: .normal,
-        notifications: [
-            "tips": true,
-            "errors": true,
-            "paste_blocked": true,
-            "milestones": true,
-            "formatting": true,
-            "transcript_status": true
-        ],
-        stylePreferences: [
-            "personal": "Casual",
-            "work": "Formal",
-            "email": "Formal",
-            "other": "Formal"
-        ]
+        notifications: Dictionary(uniqueKeysWithValues: NotificationPreference.allCases.map { ($0.rawValue, true) }),
+        stylePreferences: Dictionary(uniqueKeysWithValues: WritingStyleScope.allCases.map {
+            ($0.rawValue, $0 == .personal ? "Casual" : "Formal")
+        })
     )
 }
 
@@ -113,7 +124,7 @@ final class SettingsStore {
             transcriptionProvider: TranscriptionProvider(rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? "") ?? fallback.transcriptionProvider,
             transcriptionModel: normalizeTranscriptionModel(defaults.string(forKey: Key.transcriptionModel) ?? fallback.transcriptionModel),
             groqAPIKey: apiKeyStore.loadAPIKey(),
-            transcriptionLanguage: "en",
+            transcriptionLanguage: AppSettings.defaultTranscriptionLanguage,
             flowBarPosition: FlowBarPosition(rawValue: defaults.string(forKey: Key.flowBarPosition) ?? "") ?? fallback.flowBarPosition,
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
             retentionPolicy: RetentionPolicy(rawValue: defaults.string(forKey: Key.retentionPolicy) ?? "") ?? fallback.retentionPolicy,
@@ -132,7 +143,7 @@ final class SettingsStore {
         defaults.set(settings.transcriptionProvider.rawValue, forKey: Key.transcriptionProvider)
         defaults.set(normalizeTranscriptionModel(settings.transcriptionModel), forKey: Key.transcriptionModel)
         apiKeyStore.saveAPIKey(settings.groqAPIKey)
-        defaults.set("en", forKey: Key.transcriptionLanguage)
+        defaults.set(AppSettings.defaultTranscriptionLanguage, forKey: Key.transcriptionLanguage)
         defaults.set(settings.flowBarPosition.rawValue, forKey: Key.flowBarPosition)
         defaults.set(settings.restoreClipboardAfterPaste, forKey: Key.restoreClipboardAfterPaste)
         defaults.set(settings.retentionPolicy.rawValue, forKey: Key.retentionPolicy)
@@ -151,7 +162,7 @@ final class SettingsStore {
             Key.commandModeShortcut: fallback.commandModeShortcut,
             Key.transcriptionProvider: fallback.transcriptionProvider.rawValue,
             Key.transcriptionModel: fallback.transcriptionModel,
-            Key.transcriptionLanguage: "en",
+            Key.transcriptionLanguage: AppSettings.defaultTranscriptionLanguage,
             Key.flowBarPosition: fallback.flowBarPosition.rawValue,
             Key.restoreClipboardAfterPaste: fallback.restoreClipboardAfterPaste,
             Key.retentionPolicy: fallback.retentionPolicy.rawValue,

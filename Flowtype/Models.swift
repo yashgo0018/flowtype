@@ -46,7 +46,7 @@ final class Snippet {
     var createdAt: Date
     var updatedAt: Date
 
-    init(trigger: String, expansion: String, scope: String = "personal", createdAt: Date = .now, updatedAt: Date = .now) {
+    init(trigger: String, expansion: String, scope: String = WritingStyleScope.personal.rawValue, createdAt: Date = .now, updatedAt: Date = .now) {
         self.trigger = trigger
         self.expansion = expansion
         self.scope = scope
@@ -124,12 +124,12 @@ final class LocalStore {
     }
 
     func saveTranscript(_ transcript: String, pasted: Bool, statusMessage: String, retentionPolicy: RetentionPolicy) throws {
-        recordUsage(wordCount: transcript.split(whereSeparator: \.isWhitespace).count, pasted: pasted)
+        try recordUsage(wordCount: transcript.split(whereSeparator: \.isWhitespace).count, pasted: pasted)
         switch retentionPolicy {
         case .normal:
             context.insert(TranscriptHistoryItem(transcript: transcript, pasted: pasted, statusMessage: statusMessage))
         case .twentyFourHours:
-            deleteHistory(olderThan: Date().addingTimeInterval(-24 * 60 * 60))
+            try deleteHistory(olderThan: Date().addingTimeInterval(-24 * 60 * 60))
             context.insert(TranscriptHistoryItem(transcript: transcript, pasted: pasted, statusMessage: statusMessage))
         case .never:
             break
@@ -137,10 +137,10 @@ final class LocalStore {
         try context.save()
     }
 
-    func recordUsage(wordCount: Int, pasted: Bool, date: Date = .now) {
+    func recordUsage(wordCount: Int, pasted: Bool, date: Date = .now) throws {
         let day = Self.dayFormatter.string(from: date)
         let descriptor = FetchDescriptor<DailyUsage>(predicate: #Predicate { $0.day == day })
-        let usage = (try? context.fetch(descriptor).first) ?? DailyUsage(day: day)
+        let usage = try context.fetch(descriptor).first ?? DailyUsage(day: day)
         if usage.modelContext == nil {
             context.insert(usage)
         }
@@ -165,12 +165,11 @@ final class LocalStore {
         try context.save()
     }
 
-    func deleteHistory(olderThan cutoff: Date) {
+    func deleteHistory(olderThan cutoff: Date) throws {
         let descriptor = FetchDescriptor<TranscriptHistoryItem>(predicate: #Predicate { $0.createdAt < cutoff })
-        if let entries = try? context.fetch(descriptor) {
-            for entry in entries {
-                context.delete(entry)
-            }
+        let entries = try context.fetch(descriptor)
+        for entry in entries {
+            context.delete(entry)
         }
     }
 
