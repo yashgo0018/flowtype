@@ -193,7 +193,7 @@ protocol GroqAPIKeyStoring {
 }
 
 final class KeychainGroqAPIKeyStore: GroqAPIKeyStoring {
-    private let service = "com.yashgoyal.Flowtype"
+    private let service = "studio.infinitumlabs.flowtype"
     private let account = "groq-api-key"
 
     func loadAPIKey() -> String {

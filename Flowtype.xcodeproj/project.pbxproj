@@ -369,7 +369,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yashgoyal.Flowtype;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype;
 				PRODUCT_MODULE_NAME = Flowtype;
 				PRODUCT_NAME = "Flowtype";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -394,7 +394,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yashgoyal.Flowtype;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype;
 				PRODUCT_MODULE_NAME = Flowtype;
 				PRODUCT_NAME = "Flowtype";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -414,7 +414,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yashgoyal.FlowtypeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flowtype.app/Contents/MacOS/Flowtype";
@@ -433,7 +433,7 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.yashgoyal.FlowtypeTests;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 6.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Flowtype.app/Contents/MacOS/Flowtype";
