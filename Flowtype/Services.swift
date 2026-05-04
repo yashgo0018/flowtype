@@ -4,10 +4,7 @@ import AVFoundation
 import Carbon.HIToolbox
 import CoreGraphics
 import Foundation
-import os
 @preconcurrency import WhisperKit
-
-private let pasteLog = Logger(subsystem: "com.yashgoyal.Flowtype", category: "paste")
 
 struct CapturedAudio: Sendable {
     let url: URL
@@ -182,7 +179,7 @@ final class WhisperKitTranscriptionService: Transcribing {
         )
         let result = try await kit.transcribe(audioPath: audioURL.path, decodeOptions: options)
         let text = result.map(\.text).joined(separator: " ")
-        return cleanTranscript(text)
+        return normalizeTranscript(text)
     }
 
     func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
@@ -206,7 +203,6 @@ final class WhisperKitTranscriptionService: Transcribing {
             return whisperKit
         }
         let appSupport = try appSupportDirectory(create: true)
-        try FileManager.default.createDirectory(at: appSupport, withIntermediateDirectories: true)
         let config = WhisperKitConfig(
             model: modelName,
             downloadBase: appSupport,
@@ -243,8 +239,7 @@ final class WhisperKitTranscriptionService: Transcribing {
 
     private func localModelFolder(for modelName: String) -> URL? {
         guard let appSupport = try? appSupportDirectory(create: false) else { return nil }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: appSupport.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        guard isDirectory(appSupport) else {
             return nil
         }
 
@@ -275,24 +270,21 @@ final class WhisperKitTranscriptionService: Transcribing {
     }
 
     private func containsRequiredModelFiles(_ folder: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+        guard isDirectory(folder) else {
             return false
         }
 
         let requiredDirectories = ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "TextDecoder.mlmodelc"]
         let hasCompiledModels = requiredDirectories.allSatisfy { name in
-            var isDirectory: ObjCBool = false
-            let path = folder.appendingPathComponent(name, isDirectory: true).path
-            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && isDirectory.boolValue
+            isDirectory(folder.appendingPathComponent(name, isDirectory: true))
         }
         let hasConfig = FileManager.default.fileExists(atPath: folder.appendingPathComponent("config.json").path)
         return hasCompiledModels && hasConfig
     }
 
-    private func cleanTranscript(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
     }
 }
 
@@ -327,7 +319,7 @@ final class GroqTranscriptionService: Transcribing {
         }
 
         let transcription = try JSONDecoder().decode(GroqTranscriptionResponse.self, from: data)
-        return cleanTranscript(transcription.text)
+        return normalizeTranscript(transcription.text)
     }
 
     func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
@@ -391,10 +383,6 @@ final class GroqTranscriptionService: Transcribing {
         return String(data: data, encoding: .utf8) ?? "Unknown Groq API error."
     }
 
-    private func cleanTranscript(_ text: String) -> String {
-        text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }
 
 private struct GroqTranscriptionResponse: Decodable {
@@ -424,6 +412,11 @@ private enum GroqTranscriptionError: LocalizedError {
             "Groq API error \(statusCode): \(message)"
         }
     }
+}
+
+private func normalizeTranscript(_ text: String) -> String {
+    text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 private extension String {
@@ -516,12 +509,15 @@ final class PasteService: Pasting {
             return .ownApp
         }
 
-        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        guard let resolvedPID = focusedPID ?? frontmostPID, resolvedPID != appPID else {
+        guard let focusedElement, let resolvedPID = focusedPID, resolvedPID != appPID else {
             return .unavailable
         }
 
-        let role = focusedElement.flatMap { self.role(for: $0) }
+        let role = role(for: focusedElement)
+        guard isTextEntryElement(focusedElement, role: role) else {
+            return .unavailable
+        }
+
         return .text(PasteTarget(processIdentifier: resolvedPID, focusedElement: focusedElement, role: role))
     }
 
@@ -533,10 +529,16 @@ final class PasteService: Pasting {
 
         let target = target ?? capturePasteTarget()
 
-        let appPID = ProcessInfo.processInfo.processIdentifier
-        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        let canSendCmdV = (target?.processIdentifier ?? frontmostPID).map { $0 != appPID } ?? false
+        guard let target, target.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setString(cleaned, forType: .string) else {
+                return PasteOutcome(pasted: false, message: "Could not write transcript to clipboard.")
+            }
+            return PasteOutcome(pasted: false, message: "Copied transcript to clipboard. No focused field detected.")
+        }
 
+        Self.reactivateTarget(target)
         let pasteboard = NSPasteboard.general
         let previous = pasteboard.string(forType: .string)
         pasteboard.clearContents()
@@ -544,85 +546,33 @@ final class PasteService: Pasting {
             return PasteOutcome(pasted: false, message: "Could not write transcript to clipboard.")
         }
 
-        if canSendCmdV {
-            if let target {
-                Self.reactivateTarget(target)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                Self.sendCommandV()
-            }
-
-            if restoreClipboard, let previous {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                    pasteboard.clearContents()
-                    pasteboard.setString(previous, forType: .string)
-                }
-            }
-
-            return PasteOutcome(pasted: true, message: "Pasted transcript.")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            Self.sendCommandV()
         }
 
-        if let target, target.focusedElement != nil {
-            Self.reactivateTarget(target)
-            if Self.insertTextWithAccessibility(cleaned, into: target) {
-                return PasteOutcome(pasted: true, message: "Inserted transcript.")
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            Self.removeTemporaryTranscriptFromClipboard(
+                cleaned,
+                previous: previous,
+                restorePrevious: restoreClipboard,
+                pasteboard: pasteboard
+            )
         }
 
-        return PasteOutcome(pasted: false, message: "Copied transcript to clipboard. No focused field detected.")
+        return PasteOutcome(pasted: true, message: "Pasted transcript.")
     }
 
-    private static func insertTextWithAccessibility(_ text: String, into target: PasteTarget) -> Bool {
-        guard let element = target.focusedElement else { return false }
-
-        let rawValue = stringValue(for: element)
-        let placeholder = placeholderValue(for: element)
-        let charCount = numberOfCharacters(for: element)
-        let preRange = selectedTextRange(for: element)
-
-        pasteLog.info("ax-insert: role=\(target.role ?? "nil", privacy: .public) rawValue=\(rawValue ?? "<nil>", privacy: .public) placeholder=\(placeholder ?? "<nil>", privacy: .public) charCount=\(String(describing: charCount), privacy: .public) preRange=\(String(describing: preRange), privacy: .public)")
-
-        let isEmpty: Bool
-        if let charCount {
-            isEmpty = charCount == 0
-        } else if let rawValue, let placeholder, rawValue == placeholder {
-            isEmpty = true
-        } else {
-            isEmpty = (rawValue?.isEmpty ?? true)
+    private static func removeTemporaryTranscriptFromClipboard(
+        _ transcript: String,
+        previous: String?,
+        restorePrevious: Bool,
+        pasteboard: NSPasteboard
+    ) {
+        guard pasteboard.string(forType: .string) == transcript else { return }
+        pasteboard.clearContents()
+        if restorePrevious, let previous {
+            pasteboard.setString(previous, forType: .string)
         }
-
-        let baseValue: NSString
-        let safeRange: NSRange
-
-        if isEmpty {
-            baseValue = ""
-            safeRange = NSRange(location: 0, length: 0)
-        } else {
-            guard let currentValue = rawValue else { return false }
-            baseValue = currentValue as NSString
-            if let selectedRange = preRange, NSMaxRange(selectedRange) <= baseValue.length {
-                safeRange = selectedRange
-            } else {
-                return false
-            }
-        }
-
-        let updatedValue = baseValue.replacingCharacters(in: safeRange, with: text)
-        let valueResult = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, updatedValue as CFTypeRef)
-        pasteLog.info("ax-insert: isEmpty=\(isEmpty, privacy: .public) safeRange=\(NSStringFromRange(safeRange), privacy: .public) writeAX=\(valueResult.rawValue, privacy: .public)")
-        guard valueResult == .success else {
-            return false
-        }
-
-        let newCursorPosition = safeRange.location + (text as NSString).length
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            var cursorRange = CFRange(location: newCursorPosition, length: 0)
-            if let cursorValue = AXValueCreate(.cfRange, &cursorRange) {
-                let cursorResult = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, cursorValue)
-                pasteLog.info("ax-insert: cursor write to \(newCursorPosition, privacy: .public) result=\(cursorResult.rawValue, privacy: .public)")
-            }
-        }
-        return true
     }
 
     private static func numberOfCharacters(for element: AXUIElement) -> Int? {
@@ -631,22 +581,6 @@ final class PasteService: Pasting {
             return nil
         }
         return (value as? NSNumber)?.intValue
-    }
-
-    private static func placeholderValue(for element: AXUIElement) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXPlaceholderValueAttribute as CFString, &value) == .success else {
-            return nil
-        }
-        return value as? String
-    }
-
-    private static func stringValue(for element: AXUIElement) -> String? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success else {
-            return nil
-        }
-        return value as? String
     }
 
     private static func selectedTextRange(for element: AXUIElement) -> NSRange? {
@@ -690,6 +624,18 @@ final class PasteService: Pasting {
         var roleValue: CFTypeRef?
         AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
         return roleValue as? String
+    }
+
+    private func isTextEntryElement(_ element: AXUIElement, role: String?) -> Bool {
+        let textRoles = [
+            kAXTextFieldRole,
+            kAXTextAreaRole,
+            kAXComboBoxRole
+        ] as [String]
+        if let role, textRoles.contains(role) {
+            return true
+        }
+        return Self.selectedTextRange(for: element) != nil || Self.numberOfCharacters(for: element) != nil
     }
 }
 

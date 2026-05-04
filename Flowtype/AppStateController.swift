@@ -174,9 +174,12 @@ final class AppStateController: ObservableObject {
     func requestPermissions() {
         if !PermissionService.hasAccessibilityPermission(prompt: false) {
             _ = PermissionService.hasAccessibilityPermission(prompt: true)
-        }
-        if !PermissionService.hasAccessibilityPermission(prompt: false) {
-            PermissionService.openAccessibilitySettings()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                if !PermissionService.hasAccessibilityPermission(prompt: false) {
+                    PermissionService.openAccessibilitySettings()
+                }
+                self.checkPermissions()
+            }
         }
         Task {
             _ = await PermissionService.requestMicrophoneAccess()
