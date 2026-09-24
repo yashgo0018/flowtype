@@ -1,6 +1,17 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
+import os
+
+/// Unified logging, viewable in Console.app under the app's subsystem. Transcript text is never logged.
+enum Log {
+    private static let subsystem = Bundle.main.bundleIdentifier ?? "studio.infinitumlabs.flowtype"
+    static let app = Logger(subsystem: subsystem, category: "app")
+    static let audio = Logger(subsystem: subsystem, category: "audio")
+    static let dictation = Logger(subsystem: subsystem, category: "dictation")
+    static let hotkeys = Logger(subsystem: subsystem, category: "hotkeys")
+    static let data = Logger(subsystem: subsystem, category: "data")
+}
 
 struct PermissionStatus: Equatable {
     var microphone: AVAuthorizationStatus
@@ -55,7 +66,7 @@ enum PermissionService {
             try process.run()
             process.waitUntilExit()
         } catch {
-            NSLog("Flowtype could not reset Accessibility permission: \(error.localizedDescription)")
+            Log.app.error("Could not reset Accessibility permission: \(error.localizedDescription, privacy: .public)")
         }
     }
 

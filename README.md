@@ -8,7 +8,7 @@ Native macOS dictation. Hold a key, speak, and the text is typed into whatever a
 - **Hands-free:** press **⌃⌥Space** to start and again to stop. Holding it also works as push-to-talk.
 - **Cancel:** **Esc** while dictating.
 - **Paste last transcript:** **⌃⌘V**.
-- The **Flow Bar** at the bottom of the screen shows a live waveform while recording. Hover it for a mic button.
+- The **dictation bar** at the bottom of the screen shows a live waveform while recording. Hover it for a mic button.
 - The **menu bar icon** opens the Hub (Home, History, Dictionary, Snippets, Notes, Settings) and has Quit.
 
 **Dictionary** entries fix spellings and casing in every transcript and are sent to Groq as vocabulary hints. **Snippets** expand a spoken cue ("my calendar link") into saved text.

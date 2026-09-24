@@ -53,7 +53,8 @@ final class HotKeyService {
     func setCancelEnabled(_ enabled: Bool) {
         guard enabled != cancelEnabled else { return }
         cancelEnabled = enabled
-        guard !suspended else { return }
+        // Nothing is registered until configure() runs; it picks up cancelEnabled then.
+        guard !suspended, handlerRef != nil else { return }
         if enabled {
             let escape = ParsedShortcut(keyCode: UInt16(kVK_Escape), modifiers: [])
             _ = register(escape, id: .cancel)
@@ -123,7 +124,7 @@ final class HotKeyService {
             &ref
         )
         guard status == noErr, let ref else {
-            NSLog("Flowtype could not register hotkey \(id): \(status)")
+            Log.hotkeys.error("Could not register hotkey \(String(describing: id), privacy: .public): \(status)")
             return false
         }
         registered[id] = ref
@@ -172,7 +173,7 @@ final class HotKeyService {
             &handlerRef
         )
         if status != noErr {
-            NSLog("Flowtype could not install hotkey handler: \(status)")
+            Log.hotkeys.error("Could not install hotkey handler: \(status)")
         }
     }
 

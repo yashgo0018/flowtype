@@ -81,7 +81,7 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Flow Bar") {
+            Section("Dictation bar") {
                 Picker("Position", selection: binding(\.flowBarPosition)) {
                     ForEach(FlowBarPosition.allCases) { position in
                         Text(position.title).tag(position)
@@ -114,8 +114,29 @@ struct SettingsView: View {
                     .padding(.vertical, 4)
             }
 
-            Section {
-                LabeledContent("Version", value: Self.versionString)
+            Section("About") {
+                LabeledContent("Version") {
+                    HStack(spacing: 12) {
+                        Text(Self.versionString).foregroundStyle(.secondary)
+                        Button("Check for Updates…") { controller.onCheckForUpdates?() }
+                    }
+                }
+                LabeledContent("Privacy") {
+                    Link("Privacy Policy", destination: URL(string: "https://github.com/yashgo0018/flowtype/blob/main/PRIVACY.md")!)
+                }
+                DisclosureGroup("Acknowledgements") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Self.acknowledgements, id: \.name) { item in
+                            HStack {
+                                Link(item.name, destination: URL(string: item.url)!)
+                                Spacer()
+                                Text(item.license).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .font(.callout)
+                    .padding(.top, 4)
+                }
             }
         }
         .formStyle(.grouped)
@@ -211,6 +232,19 @@ struct SettingsView: View {
         error = result
         return result
     }
+
+    private static let acknowledgements: [(name: String, license: String, url: String)] = [
+        ("OpenAI Whisper models", "MIT", "https://github.com/openai/whisper"),
+        ("WhisperKit", "MIT", "https://github.com/argmaxinc/WhisperKit"),
+        ("Sparkle", "MIT", "https://github.com/sparkle-project/Sparkle"),
+        ("swift-transformers", "Apache 2.0", "https://github.com/huggingface/swift-transformers"),
+        ("swift-jinja", "Apache 2.0", "https://github.com/huggingface/swift-jinja"),
+        ("Swift Collections", "Apache 2.0", "https://github.com/apple/swift-collections"),
+        ("Swift Crypto", "Apache 2.0", "https://github.com/apple/swift-crypto"),
+        ("Swift ASN.1", "Apache 2.0", "https://github.com/apple/swift-asn1"),
+        ("Swift Argument Parser", "Apache 2.0", "https://github.com/apple/swift-argument-parser"),
+        ("yyjson", "MIT", "https://github.com/ibireme/yyjson")
+    ]
 
     private static var versionString: String {
         let info = Bundle.main.infoDictionary

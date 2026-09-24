@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Sparkle
 import SwiftData
 import SwiftUI
 
@@ -33,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var hubWindow: NSWindow?
     private var statusItem: NSStatusItem?
     private var cancellables: Set<AnyCancellable> = []
+    private let updateReminders = GentleUpdateReminders()
+    private var updaterController: SPUStandardUpdaterController?
 
     private static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -42,9 +45,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.setActivationPolicy(.accessory)
         guard !Self.isRunningTests else { return }
 
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: updateReminders
+        )
+
         let container = NativeSchema.makeContainer()
         modelContainer = container
         controller.onShowHub = { [weak self] in self?.showHub() }
+        controller.onCheckForUpdates = { [weak self] in self?.checkForUpdates() }
         controller.start(localStore: LocalStore(context: container.mainContext))
 
         let flowBar = FlowBarPanelController(controller: controller)
@@ -61,6 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showHub()
         return false
+    }
+
+    func checkForUpdates() {
+        NSApp.activate()
+        updaterController?.checkForUpdates(nil)
     }
 
     // MARK: - Hub window
@@ -163,6 +178,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         settings.keyEquivalent = ","
         menu.addItem(settings)
+        menu.addItem(actionItem("Check for Updates…", image: "arrow.triangle.2.circlepath") { [weak self] in
+            self?.checkForUpdates()
+        })
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit Flowtype", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -188,6 +206,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         guard !key.isEmpty else { return }
         item.keyEquivalent = key
         item.keyEquivalentModifierMask = parsed.modifiers
+    }
+}
+
+/// Flowtype lives in the menu bar, so scheduled update prompts are shown without stealing focus
+/// from whatever the user is typing in.
+private final class GentleUpdateReminders: NSObject, SPUStandardUserDriverDelegate {
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool {
+        true
     }
 }
 

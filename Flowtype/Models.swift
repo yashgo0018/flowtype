@@ -134,13 +134,13 @@ enum NativeSchema {
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
-            NSLog("Flowtype could not open its data store: \(error). Moving it aside.")
+            Log.data.fault("Could not open the data store, moving it aside: \(error.localizedDescription, privacy: .public)")
             moveStoreAside(configuration.url)
         }
         do {
             return try ModelContainer(for: schema, configurations: [configuration])
         } catch {
-            NSLog("Flowtype falling back to an in-memory store: \(error)")
+            Log.data.fault("Falling back to an in-memory store: \(error.localizedDescription, privacy: .public)")
             let memory = ModelConfiguration("Flowtype-memory", schema: schema, isStoredInMemoryOnly: true)
             // An in-memory store with a valid schema cannot fail to open.
             return try! ModelContainer(for: schema, configurations: [memory])
@@ -169,12 +169,6 @@ enum TextMetrics {
     static func dayKey(for date: Date, calendar: Calendar = .current) -> String {
         let components = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
-    }
-
-    static func date(fromDayKey key: String, calendar: Calendar = .current) -> Date? {
-        let parts = key.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return nil }
-        return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
     }
 
     /// Consecutive days with dictation ending today (or yesterday, so a streak survives until you dictate today).

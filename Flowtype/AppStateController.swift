@@ -122,12 +122,14 @@ final class AppStateController: ObservableObject {
     let levelMeter = AudioLevelMeter()
     /// Asks the app to show the Hub window.
     var onShowHub: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
 
     private let settingsStore: SettingsStore
     private let audio: AudioCapturing
     private let transcriber: Transcribing
     private let pasteService: Pasting
     private let hotKeys: HotKeyService
+    private let currentPermissions: @MainActor () -> PermissionStatus
     private var localStore: LocalStore?
 
     private var pasteTarget: PasteTarget?
@@ -137,13 +139,17 @@ final class AppStateController: ObservableObject {
     private var modelPreparationTask: Task<Void, Never>?
     private var toggleHeldSince: Date?
     private var maintenanceTimers: [Timer] = []
+    private var lastDictationAt = Date()
+    /// The on-device model uses 0.5–1.5 GB of memory; release it after this long without dictating.
+    static let modelIdleUnloadInterval: TimeInterval = 20 * 60
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
         audio: AudioCapturing = AudioRecorder(),
         transcriber: Transcribing = DefaultTranscriptionService(),
         pasteService: Pasting = PasteService(),
-        hotKeys: HotKeyService = HotKeyService()
+        hotKeys: HotKeyService = HotKeyService(),
+        permissions: @escaping @MainActor () -> PermissionStatus = { PermissionStatus.current() }
     ) {
         let loadedSettings = settingsStore.load()
         self.settingsStore = settingsStore
@@ -152,7 +158,8 @@ final class AppStateController: ObservableObject {
         self.transcriber = transcriber
         self.pasteService = pasteService
         self.hotKeys = hotKeys
-        self.permissions = PermissionStatus.current()
+        self.currentPermissions = permissions
+        self.permissions = permissions()
         self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
     }
 
@@ -192,20 +199,29 @@ final class AppStateController: ObservableObject {
         let permissionTimer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshPermissions() }
         }
-        let retentionTimer = Timer(timeInterval: 30 * 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                try? self.localStore?.applyRetention(self.settings.retentionPolicy)
-            }
+        let housekeepingTimer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.performHousekeeping() }
         }
-        for timer in [permissionTimer, retentionTimer] {
+        for timer in [permissionTimer, housekeepingTimer] {
             RunLoop.main.add(timer, forMode: .common)
         }
-        maintenanceTimers = [permissionTimer, retentionTimer]
+        maintenanceTimers = [permissionTimer, housekeepingTimer]
 
         // Load an already-downloaded model in the background so the first dictation is fast.
         if settings.transcriptionProvider == .local, modelStatus.isReady {
             prepareModel()
+        }
+    }
+
+    /// Runs every minute: enforces history retention and frees the model when idle.
+    func performHousekeeping(now: Date = .now) {
+        try? localStore?.applyRetention(settings.retentionPolicy)
+        if !phase.isBusy,
+           modelPreparationTask == nil,
+           now.timeIntervalSince(lastDictationAt) > Self.modelIdleUnloadInterval,
+           transcriber.isLoaded(settings: settings) {
+            transcriber.unloadModel()
+            Log.dictation.info("Unloaded the speech model after being idle")
         }
     }
 
@@ -221,7 +237,7 @@ final class AppStateController: ObservableObject {
 
     // MARK: - Shortcut handling
 
-    private func handleTogglePressed() {
+    func handleTogglePressed() {
         switch phase {
         case .recording:
             toggleHeldSince = nil
@@ -236,7 +252,7 @@ final class AppStateController: ObservableObject {
     }
 
     /// Holding the hands-free shortcut works as push-to-talk: releasing it after a long press stops.
-    private func handleToggleReleased() {
+    func handleToggleReleased() {
         guard let heldSince = toggleHeldSince else { return }
         toggleHeldSince = nil
         if phase.isRecording, Date().timeIntervalSince(heldSince) >= 0.6 {
@@ -244,7 +260,7 @@ final class AppStateController: ObservableObject {
         }
     }
 
-    private func handleHoldDown() {
+    func handleHoldDown() {
         switch phase {
         case .idle, .finished:
             startRecording(mode: .pushToTalk)
@@ -253,7 +269,7 @@ final class AppStateController: ObservableObject {
         }
     }
 
-    private func handleHoldUp() {
+    func handleHoldUp() {
         guard case .recording(.pushToTalk, let startedAt) = phase else { return }
         if Date().timeIntervalSince(startedAt) < 0.3 {
             // A quick tap of the hold key is not a dictation.
@@ -263,7 +279,7 @@ final class AppStateController: ObservableObject {
         }
     }
 
-    private func handleHoldInterrupted() {
+    func handleHoldInterrupted() {
         guard case .recording(.pushToTalk, let startedAt) = phase else { return }
         // The hold key was part of a key combo (Fn+←, Fn+F5…), not push-to-talk.
         if Date().timeIntervalSince(startedAt) < 1.5 {
@@ -319,7 +335,12 @@ final class AppStateController: ObservableObject {
             return false
         }
 
-        pasteTarget = pasteService.captureTarget()
+        let target = pasteService.captureTarget()
+        if target?.isSecureField == true {
+            showFeedback(Feedback(kind: .info, title: "Password field", detail: "Dictation is off in password fields."), duration: 2.5)
+            return false
+        }
+        pasteTarget = target
         levelMeter.reset()
         do {
             try audio.start(deviceUID: settings.microphoneUID.isEmpty ? nil : settings.microphoneUID)
@@ -331,6 +352,7 @@ final class AppStateController: ObservableObject {
 
         feedbackTask?.cancel()
         sessionID = UUID()
+        lastDictationAt = .now
         phase = .recording(mode: mode, startedAt: .now)
         if settings.playSounds {
             SoundEffects.play(.start)
@@ -424,8 +446,14 @@ final class AppStateController: ObservableObject {
                 return
             }
 
-            lastTranscript = result.text
             let outcome = await pasteService.insert(result.text, into: target, restoreClipboard: settings.restoreClipboardAfterPaste)
+            if outcome == .blockedSecureField {
+                // Possibly a spoken password: don't keep it anywhere.
+                showFeedback(Feedback(kind: .info, title: "Password field", detail: "Dictation is off in password fields."), duration: 2.5)
+                return
+            }
+            lastTranscript = result.text
+            Log.dictation.info("Dictation of \(recorded.duration, format: .fixed(precision: 1))s finished: \(outcome.message, privacy: .public)")
             saveHistory(result.text, outcome: outcome, duration: recorded.duration, settings: settings)
             localStore?.recordDictionaryUsage(phrases: result.matchedPhrases)
             guard session == sessionID else { return }
@@ -443,10 +471,13 @@ final class AppStateController: ObservableObject {
                 ), duration: 5)
             case .copied:
                 showFeedback(Feedback(kind: .info, title: "Copied — press ⌘V", detail: "No text field was focused."), duration: 3.5)
+            case .blockedSecureField:
+                break
             }
         } catch is CancellationError {
             return
         } catch {
+            Log.dictation.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             guard session == sessionID, !Task.isCancelled else { return }
             if settings.playSounds {
                 SoundEffects.play(.error)
@@ -465,7 +496,7 @@ final class AppStateController: ObservableObject {
                 retentionPolicy: settings.retentionPolicy
             )
         } catch {
-            NSLog("Flowtype could not save history: \(error.localizedDescription)")
+            Log.data.error("Could not save history: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -484,7 +515,12 @@ final class AppStateController: ObservableObject {
             // Let the shortcut's modifier keys come up first.
             try? await Task.sleep(for: .milliseconds(120))
             let outcome = await pasteService.insert(text, into: nil, restoreClipboard: settings.restoreClipboardAfterPaste)
-            showFeedback(Feedback(kind: outcome.pasted ? .success : .info, title: outcome.pasted ? "Pasted" : "Copied — press ⌘V"), duration: 1.6)
+            let title = switch outcome {
+            case .pasted: "Pasted"
+            case .copied: "Copied — press ⌘V"
+            case .blockedSecureField: "Not typed into a password field"
+            }
+            showFeedback(Feedback(kind: outcome.pasted ? .success : .info, title: title), duration: 1.6)
         }
     }
 
@@ -529,7 +565,7 @@ final class AppStateController: ObservableObject {
     // MARK: - Permissions
 
     func refreshPermissions() {
-        let current = PermissionStatus.current()
+        let current = currentPermissions()
         guard current != permissions else { return }
         let gainedAccessibility = current.accessibility && !permissions.accessibility
         permissions = current
@@ -639,6 +675,7 @@ final class AppStateController: ObservableObject {
                     }
                 }
             } catch {
+                Log.dictation.error("Model preparation failed: \(error.localizedDescription, privacy: .public)")
                 modelError = "Model download failed: \(error.localizedDescription)"
             }
             modelPreparationTask = nil
@@ -669,7 +706,7 @@ final class AppStateController: ObservableObject {
             try localStore?.deleteAllHistory()
             lastTranscript = nil
         } catch {
-            NSLog("Flowtype could not delete history: \(error.localizedDescription)")
+            Log.data.error("Could not delete history: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

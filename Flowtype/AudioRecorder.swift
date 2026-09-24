@@ -290,7 +290,7 @@ enum AudioDevices {
             UInt32(MemoryLayout<AudioDeviceID>.size)
         )
         if status != noErr {
-            NSLog("Flowtype could not select input device \(deviceID): \(status)")
+            Log.audio.error("Could not select input device \(deviceID): \(status)")
         }
     }
 

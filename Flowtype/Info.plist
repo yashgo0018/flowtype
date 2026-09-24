@@ -24,6 +24,12 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Flowtype records microphone audio locally so it can transcribe your speech.</string>
+	<key>SUFeedURL</key>
+	<string>https://github.com/yashgo0018/flowtype/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>VEagWL+PapW63eF5JLNq1h1/QBresH6fqeRT1cV4tK0=</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

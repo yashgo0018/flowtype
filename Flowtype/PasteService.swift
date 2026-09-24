@@ -8,6 +8,8 @@ struct PasteTarget {
     let bundleIdentifier: String?
     let appName: String?
     let focusedElement: AXUIElement?
+    /// The focused element is a password field.
+    let isSecureField: Bool
 
     var isOwnApp: Bool { processIdentifier == ProcessInfo.processInfo.processIdentifier }
 }
@@ -15,6 +17,8 @@ struct PasteTarget {
 enum PasteOutcome: Equatable, Sendable {
     case pasted
     case copied(reason: CopyReason)
+    /// Refused because a password field is focused; nothing was pasted or copied.
+    case blockedSecureField
 
     enum CopyReason: Equatable, Sendable {
         case needsAccessibility
@@ -30,6 +34,7 @@ enum PasteOutcome: Equatable, Sendable {
         case .copied(.needsAccessibility): "Copied — allow Accessibility to paste automatically"
         case .copied(.noTarget): "Copied to clipboard — press ⌘V to paste"
         case .copied(.clipboardOnly): "Copied to clipboard"
+        case .blockedSecureField: "Not typed into a password field"
         }
     }
 }
@@ -55,7 +60,8 @@ final class PasteService: Pasting {
             processIdentifier: app.processIdentifier,
             bundleIdentifier: app.bundleIdentifier,
             appName: app.localizedName,
-            focusedElement: focused
+            focusedElement: focused,
+            isSecureField: focused.map(Self.isSecureField) ?? false
         )
     }
 
@@ -79,6 +85,10 @@ final class PasteService: Pasting {
         await bringToFront(target)
 
         let element = target.focusedElement ?? Self.focusedElement(in: target.processIdentifier)
+        // Focus may have moved to a password field since recording started.
+        if target.isSecureField || element.map(Self.isSecureField) == true {
+            return .blockedSecureField
+        }
         let finalText = TranscriptPostProcessor.applySmartSpacing(text, precedingCharacter: element.flatMap(Self.characterBeforeCaret))
 
         let pasteboard = NSPasteboard.general
@@ -156,6 +166,14 @@ final class PasteService: Pasting {
             return nil
         }
         return (value as! AXUIElement)
+    }
+
+    private static func isSecureField(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXSubroleAttribute as CFString, &value) == .success else {
+            return false
+        }
+        return (value as? String) == (kAXSecureTextFieldSubrole as String)
     }
 
     private static func characterBeforeCaret(in element: AXUIElement) -> Character? {

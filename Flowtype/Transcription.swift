@@ -17,6 +17,8 @@ protocol Transcribing: AnyObject {
     /// Downloads (if needed) and loads the model so the next dictation starts instantly.
     func prepare(settings: AppSettings, progress: ModelPreparationProgress?) async throws
     func isLoaded(settings: AppSettings) -> Bool
+    /// Releases the in-memory model; the next dictation loads it again.
+    func unloadModel()
     func deleteDownloadedModels() throws
 }
 
@@ -54,6 +56,10 @@ final class DefaultTranscriptionService: Transcribing {
 
     func isLoaded(settings: AppSettings) -> Bool {
         service(for: settings).isLoaded(settings: settings)
+    }
+
+    func unloadModel() {
+        localService.unloadModel()
     }
 
     func deleteDownloadedModels() throws {
@@ -101,6 +107,12 @@ final class WhisperKitTranscriptionService: Transcribing {
 
     func isLoaded(settings: AppSettings) -> Bool {
         whisperKit != nil && loadedModelName == SettingsStore.normalizeTranscriptionModel(settings.transcriptionModel)
+    }
+
+    func unloadModel() {
+        guard loadingTask == nil else { return }
+        whisperKit = nil
+        loadedModelName = nil
     }
 
     func deleteDownloadedModels() throws {
@@ -246,6 +258,8 @@ final class GroqTranscriptionService: Transcribing {
     func isLoaded(settings: AppSettings) -> Bool {
         settings.hasGroqAPIKey
     }
+
+    func unloadModel() {}
 
     func deleteDownloadedModels() throws {}
 
