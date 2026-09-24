@@ -37,7 +37,8 @@ One-time setup:
    ```bash
    xcrun notarytool store-credentials flowtype-notary --apple-id <you@example.com> --team-id HZHNBYQCWN --password <app-specific-password>
    ```
-2. The Sparkle signing key is already in your login keychain (account `studio.infinitumlabs.flowtype`). Its public half is `SUPublicEDKey` in `Info.plist`. **Back it up**: without it you can never ship another update to existing installs.
+2. The DMG is signed with the local **Developer ID Application** certificate (Xcode → Settings → Accounts → Manage Certificates). Back up its private key: in Keychain Access, export it from My Certificates as a password-protected `.p12`.
+3. The Sparkle signing key is already in your login keychain (account `studio.infinitumlabs.flowtype`). Its public half is `SUPublicEDKey` in `Info.plist`. **Back it up**: without it you can never ship another update to existing installs.
    ```bash
    build/DerivedData/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_keys --account studio.infinitumlabs.flowtype -x sparkle-private-key.txt
    ```
@@ -45,9 +46,10 @@ One-time setup:
 
 Each release:
 
-1. Bump `MARKETING_VERSION` in the project and commit. The build number comes from the git commit count.
-2. Run `scripts/release.sh` to produce `build/release/Flowtype-<version>.dmg` and `appcast.xml`.
-3. Run `scripts/release.sh --publish` to also tag the release and upload both files to GitHub.
+1. On `main`, bump `MARKETING_VERSION` in the project and commit. The build number comes from the git commit count.
+2. Run `scripts/release.sh`. It builds, notarizes the app and DMG, and writes `build/release/Flowtype-<version>.dmg` and `appcast.xml`. For now Apple takes about an hour per notarization for this team.
+3. Install from the DMG and test it.
+4. Run `scripts/release.sh --publish`. It uploads exactly the files you tested, pushes `main` and the tag, and creates the GitHub release. It refuses if the code changed after the build.
 
 The app icon is drawn by `scripts/render-icon.swift`; rerun it to regenerate `AppIcon.appiconset`.
 

@@ -7,7 +7,9 @@
 #
 # Usage:
 #   scripts/release.sh            # build, notarize, create DMG + appcast in build/release
-#   scripts/release.sh --publish  # also create the GitHub release (public!)
+#   scripts/release.sh --publish  # upload exactly those files as a GitHub release (public!)
+#
+# Publishing never rebuilds: what you tested is what ships.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -26,6 +28,32 @@ step() { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[1;31merror:\033[0m %s\n' "$1" >&2; exit 1; }
 
 [[ -z "$(git status --porcelain)" ]] || fail "Commit or stash your changes first; releases are built from a clean tree."
+
+publish() {
+  [[ "$(git branch --show-current)" == "main" ]] || fail "Publish from main (the app links to files on main)."
+  [[ -f "$OUT/BUILD_INFO" ]] || fail "Nothing built yet. Run scripts/release.sh first and test the DMG."
+  # shellcheck source=/dev/null
+  source "$OUT/BUILD_INFO"
+  [[ "$BUILT_COMMIT" == "$(git rev-parse HEAD)" ]] \
+    || fail "The code changed since the last build ($BUILT_COMMIT). Rebuild with scripts/release.sh and test again."
+  local tag="v$BUILT_VERSION"
+  local dmg="$OUT/Flowtype-$BUILT_VERSION.dmg"
+  xcrun stapler validate "$dmg" >/dev/null || fail "$dmg is not notarized."
+  if git rev-parse "$tag" >/dev/null 2>&1; then
+    fail "Tag $tag already exists. Bump MARKETING_VERSION for a new release."
+  fi
+
+  step "Publishing Flowtype $BUILT_VERSION ($BUILT_BUILD) to GitHub"
+  git tag "$tag"
+  git push origin HEAD "$tag"
+  gh release create "$tag" "$dmg" "$OUT/appcast.xml" --repo "$REPO" --title "Flowtype $BUILT_VERSION" --generate-notes
+}
+
+if $PUBLISH; then
+  publish
+  exit 0
+fi
+
 xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || fail "No notarization credentials named '$NOTARY_PROFILE'. See the setup comment at the top of this script."
 
@@ -132,16 +160,14 @@ curl -fsSL "https://github.com/$REPO/releases/latest/download/appcast.xml" -o "$
   "$UPDATES"
 cp "$UPDATES/appcast.xml" "$OUT/appcast.xml"
 
+cat > "$OUT/BUILD_INFO" <<INFO
+BUILT_COMMIT=$(git rev-parse HEAD)
+BUILT_VERSION=$VERSION
+BUILT_BUILD=$BUILD
+INFO
+
 step "Done"
 echo "DMG:     $DMG"
 echo "Appcast: $OUT/appcast.xml"
-
-if $PUBLISH; then
-  step "Publishing $TAG to GitHub"
-  git tag "$TAG"
-  git push origin "$TAG"
-  gh release create "$TAG" "$DMG" "$OUT/appcast.xml" --repo "$REPO" --title "Flowtype $VERSION" --generate-notes
-else
-  echo
-  echo "To publish: scripts/release.sh --publish (or upload both files to a GitHub release tagged $TAG)."
-fi
+echo
+echo "Test the DMG, then publish exactly these files with: scripts/release.sh --publish"
