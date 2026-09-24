@@ -105,12 +105,19 @@ rm -rf "$STAGING"
 # awk reads all input (no early exit): closing the pipe early would SIGPIPE codesign and fail under pipefail.
 IDENTITY=$(codesign -dvv "$APP" 2>&1 | awk -F'=' '/^Authority=Developer ID Application/ && !found { print $2; found = 1 }')
 [[ -n "$IDENTITY" ]] || fail "The exported app isn't signed with a Developer ID Application certificate."
-codesign --sign "$IDENTITY" --timestamp "$DMG"
+# Xcode's cloud-managed Developer ID certificate signs the export but has no local private key.
+# Signing the DMG itself is optional: a notarized, stapled DMG passes Gatekeeper either way.
+if security find-identity -v -p codesigning | grep -qF "$IDENTITY"; then
+  codesign --sign "$IDENTITY" --timestamp "$DMG"
+else
+  echo "No local '$IDENTITY' key; leaving the DMG unsigned (it is still notarized and stapled)."
+fi
 
 step "Notarizing the DMG"
 notarize "$DMG"
 xcrun stapler staple "$DMG"
-spctl --assess --type open --context context:primary-signature "$DMG"
+xcrun stapler validate "$DMG"
+spctl --assess --type execute "$APP"
 
 step "Generating the Sparkle appcast"
 UPDATES="$OUT/updates"
