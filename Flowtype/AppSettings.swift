@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Security
 
@@ -7,13 +8,28 @@ enum RetentionPolicy: String, CaseIterable, Identifiable, Sendable {
     case never
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .normal: "Keep history"
+        case .twentyFourHours: "Delete after 24 hours"
+        case .never: "Don't save transcripts"
+        }
+    }
 }
 
 enum FlowBarPosition: String, CaseIterable, Identifiable, Sendable {
-    case bottomRight
     case bottomCenter
+    case bottomRight
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bottomCenter: "Bottom center"
+        case .bottomRight: "Bottom right"
+        }
+    }
 }
 
 enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
@@ -21,86 +37,156 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
     case groq
 
     var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .local: "On-device"
+        case .groq: "Groq cloud"
+        }
+    }
 }
 
-enum NotificationPreference: String, CaseIterable, Identifiable, Sendable {
-    case tips
-    case errors
-    case pasteBlocked = "paste_blocked"
-    case milestones
-    case formatting
-    case transcriptStatus = "transcript_status"
+/// A modifier key that is held down for push-to-talk.
+enum HoldKey: String, CaseIterable, Identifiable, Sendable {
+    case fn
+    case rightOption
+    case rightCommand
+    case rightControl
+    case off
 
     var id: String { rawValue }
+
+    init(storedValue: String) {
+        switch storedValue.lowercased() {
+        case "fn", "function", "globe": self = .fn
+        case "rightoption", "right_option": self = .rightOption
+        case "rightcommand", "right_command": self = .rightCommand
+        case "rightcontrol", "right_control": self = .rightControl
+        case "off", "none", "": self = .off
+        default: self = HoldKey(rawValue: storedValue) ?? .fn
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .fn: "Fn / Globe"
+        case .rightOption: "Right Option"
+        case .rightCommand: "Right Command"
+        case .rightControl: "Right Control"
+        case .off: "Off"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .fn: "fn"
+        case .rightOption: "Right ⌥"
+        case .rightCommand: "Right ⌘"
+        case .rightControl: "Right ⌃"
+        case .off: ""
+        }
+    }
+
+    /// Virtual key code reported by `flagsChanged` events for this key.
+    var keyCode: UInt16? {
+        switch self {
+        case .fn: 63
+        case .rightOption: 61
+        case .rightCommand: 54
+        case .rightControl: 62
+        case .off: nil
+        }
+    }
+
+    /// Device-dependent modifier bit (from IOLLEvent.h) that is set while this exact key is down.
+    var deviceFlagMask: UInt {
+        switch self {
+        case .fn: NSEvent.ModifierFlags.function.rawValue
+        case .rightOption: 0x40
+        case .rightCommand: 0x10
+        case .rightControl: 0x2000
+        case .off: 0
+        }
+    }
 }
 
-enum WritingStyleScope: String, CaseIterable, Identifiable, Sendable {
-    case personal
-    case work
-    case email
-    case other
+struct WhisperModelOption: Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let detail: String
 
-    var id: String { rawValue }
+    static let all: [WhisperModelOption] = [
+        WhisperModelOption(id: "openai_whisper-base.en", title: "Base (English)", detail: "~140 MB · fastest, good for short notes"),
+        WhisperModelOption(id: "openai_whisper-small.en", title: "Small (English)", detail: "~480 MB · balanced, recommended"),
+        WhisperModelOption(id: "openai_whisper-large-v3-v20240930_turbo_632MB", title: "Large v3 Turbo", detail: "~630 MB · most accurate, slower on older Macs")
+    ]
+
+    static func option(for id: String) -> WhisperModelOption? {
+        all.first { $0.id == id }
+    }
 }
 
 struct AppSettings: Equatable, Sendable {
     static let defaultTranscriptionModel = "openai_whisper-small.en"
     static let groqTranscriptionModel = "whisper-large-v3-turbo"
-    static let defaultTranscriptionLanguage = "en"
+    static let transcriptionLanguage = "en"
 
     var toggleShortcut: String
-    var holdShortcut: String
-    var cancelShortcut: String
+    var holdKey: HoldKey
     var pasteLastShortcut: String
-    var scratchpadShortcut: String
-    var commandModeShortcut: String
     var transcriptionProvider: TranscriptionProvider
     var transcriptionModel: String
     var groqAPIKey: String
-    var transcriptionLanguage: String
+    var microphoneUID: String
     var flowBarPosition: FlowBarPosition
+    var showFlowBarWhenIdle: Bool
+    var playSounds: Bool
     var restoreClipboardAfterPaste: Bool
     var retentionPolicy: RetentionPolicy
-    var notifications: [String: Bool]
-    var stylePreferences: [String: String]
 
     static let defaults = AppSettings(
         toggleShortcut: "ctrl+option+space",
-        holdShortcut: "fn",
-        cancelShortcut: "escape",
+        holdKey: .fn,
         pasteLastShortcut: "cmd+ctrl+v",
-        scratchpadShortcut: "option+s",
-        commandModeShortcut: "cmd+shift+space",
         transcriptionProvider: .local,
         transcriptionModel: defaultTranscriptionModel,
         groqAPIKey: "",
-        transcriptionLanguage: defaultTranscriptionLanguage,
-        flowBarPosition: .bottomRight,
+        microphoneUID: "",
+        flowBarPosition: .bottomCenter,
+        showFlowBarWhenIdle: true,
+        playSounds: true,
         restoreClipboardAfterPaste: true,
-        retentionPolicy: .normal,
-        notifications: Dictionary(uniqueKeysWithValues: NotificationPreference.allCases.map { ($0.rawValue, true) }),
-        stylePreferences: Dictionary(uniqueKeysWithValues: WritingStyleScope.allCases.map {
-            ($0.rawValue, $0 == .personal ? "Casual" : "Formal")
-        })
+        retentionPolicy: .normal
     )
+
+    var hasGroqAPIKey: Bool {
+        !groqAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Shortcut bindings that must not collide with each other.
+    var shortcutBindings: [String: String] {
+        var bindings = ["Hands-free shortcut": toggleShortcut]
+        if !pasteLastShortcut.isEmpty {
+            bindings["Paste last transcript"] = pasteLastShortcut
+        }
+        return bindings
+    }
 }
 
 final class SettingsStore {
     private enum Key {
         static let toggleShortcut = "shortcut.toggle"
         static let holdShortcut = "shortcut.hold"
-        static let cancelShortcut = "shortcut.cancel"
         static let pasteLastShortcut = "shortcut.pasteLast"
-        static let scratchpadShortcut = "shortcut.scratchpad"
-        static let commandModeShortcut = "shortcut.commandMode"
         static let transcriptionProvider = "transcription.provider"
         static let transcriptionModel = "transcription.model"
-        static let transcriptionLanguage = "transcription.language"
+        static let microphoneUID = "audio.microphoneUID"
         static let flowBarPosition = "flowBar.position"
+        static let showFlowBarWhenIdle = "flowBar.showWhenIdle"
+        static let playSounds = "feedback.playSounds"
         static let restoreClipboardAfterPaste = "clipboard.restoreAfterPaste"
         static let retentionPolicy = "retention.policy"
-        static let notifications = "notifications.preferences"
-        static let styles = "style.preferences"
+        static let hasCompletedOnboarding = "onboarding.completed"
     }
 
     private let defaults: UserDefaults
@@ -109,81 +195,58 @@ final class SettingsStore {
     init(defaults: UserDefaults = .standard, apiKeyStore: GroqAPIKeyStoring = KeychainGroqAPIKeyStore()) {
         self.defaults = defaults
         self.apiKeyStore = apiKeyStore
-        registerDefaults()
+    }
+
+    var hasCompletedOnboarding: Bool {
+        get { defaults.bool(forKey: Key.hasCompletedOnboarding) }
+        set { defaults.set(newValue, forKey: Key.hasCompletedOnboarding) }
     }
 
     func load() -> AppSettings {
         let fallback = AppSettings.defaults
+        let toggle = defaults.string(forKey: Key.toggleShortcut).flatMap(Self.validShortcut) ?? fallback.toggleShortcut
+        let pasteLast = defaults.string(forKey: Key.pasteLastShortcut).map { $0.isEmpty ? "" : (Self.validShortcut($0) ?? fallback.pasteLastShortcut) }
+            ?? fallback.pasteLastShortcut
         return AppSettings(
-            toggleShortcut: defaults.string(forKey: Key.toggleShortcut) ?? fallback.toggleShortcut,
-            holdShortcut: defaults.string(forKey: Key.holdShortcut) ?? fallback.holdShortcut,
-            cancelShortcut: defaults.string(forKey: Key.cancelShortcut) ?? fallback.cancelShortcut,
-            pasteLastShortcut: defaults.string(forKey: Key.pasteLastShortcut) ?? fallback.pasteLastShortcut,
-            scratchpadShortcut: defaults.string(forKey: Key.scratchpadShortcut) ?? fallback.scratchpadShortcut,
-            commandModeShortcut: defaults.string(forKey: Key.commandModeShortcut) ?? fallback.commandModeShortcut,
+            toggleShortcut: toggle,
+            holdKey: defaults.string(forKey: Key.holdShortcut).map(HoldKey.init(storedValue:)) ?? fallback.holdKey,
+            pasteLastShortcut: pasteLast == toggle ? "" : pasteLast,
             transcriptionProvider: TranscriptionProvider(rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? "") ?? fallback.transcriptionProvider,
-            transcriptionModel: normalizeTranscriptionModel(defaults.string(forKey: Key.transcriptionModel) ?? fallback.transcriptionModel),
+            transcriptionModel: Self.normalizeTranscriptionModel(defaults.string(forKey: Key.transcriptionModel) ?? fallback.transcriptionModel),
             groqAPIKey: apiKeyStore.loadAPIKey(),
-            transcriptionLanguage: AppSettings.defaultTranscriptionLanguage,
+            microphoneUID: defaults.string(forKey: Key.microphoneUID) ?? fallback.microphoneUID,
             flowBarPosition: FlowBarPosition(rawValue: defaults.string(forKey: Key.flowBarPosition) ?? "") ?? fallback.flowBarPosition,
+            showFlowBarWhenIdle: defaults.object(forKey: Key.showFlowBarWhenIdle) as? Bool ?? fallback.showFlowBarWhenIdle,
+            playSounds: defaults.object(forKey: Key.playSounds) as? Bool ?? fallback.playSounds,
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
-            retentionPolicy: RetentionPolicy(rawValue: defaults.string(forKey: Key.retentionPolicy) ?? "") ?? fallback.retentionPolicy,
-            notifications: defaults.dictionary(forKey: Key.notifications) as? [String: Bool] ?? fallback.notifications,
-            stylePreferences: defaults.dictionary(forKey: Key.styles) as? [String: String] ?? fallback.stylePreferences
+            retentionPolicy: RetentionPolicy(rawValue: defaults.string(forKey: Key.retentionPolicy) ?? "") ?? fallback.retentionPolicy
         )
     }
 
     func save(_ settings: AppSettings) {
         defaults.set(settings.toggleShortcut, forKey: Key.toggleShortcut)
-        defaults.set(settings.holdShortcut, forKey: Key.holdShortcut)
-        defaults.set(settings.cancelShortcut, forKey: Key.cancelShortcut)
+        defaults.set(settings.holdKey.rawValue, forKey: Key.holdShortcut)
         defaults.set(settings.pasteLastShortcut, forKey: Key.pasteLastShortcut)
-        defaults.set(settings.scratchpadShortcut, forKey: Key.scratchpadShortcut)
-        defaults.set(settings.commandModeShortcut, forKey: Key.commandModeShortcut)
         defaults.set(settings.transcriptionProvider.rawValue, forKey: Key.transcriptionProvider)
-        defaults.set(normalizeTranscriptionModel(settings.transcriptionModel), forKey: Key.transcriptionModel)
-        apiKeyStore.saveAPIKey(settings.groqAPIKey)
-        defaults.set(AppSettings.defaultTranscriptionLanguage, forKey: Key.transcriptionLanguage)
+        defaults.set(Self.normalizeTranscriptionModel(settings.transcriptionModel), forKey: Key.transcriptionModel)
+        defaults.set(settings.microphoneUID, forKey: Key.microphoneUID)
         defaults.set(settings.flowBarPosition.rawValue, forKey: Key.flowBarPosition)
+        defaults.set(settings.showFlowBarWhenIdle, forKey: Key.showFlowBarWhenIdle)
+        defaults.set(settings.playSounds, forKey: Key.playSounds)
         defaults.set(settings.restoreClipboardAfterPaste, forKey: Key.restoreClipboardAfterPaste)
         defaults.set(settings.retentionPolicy.rawValue, forKey: Key.retentionPolicy)
-        defaults.set(settings.notifications, forKey: Key.notifications)
-        defaults.set(settings.stylePreferences, forKey: Key.styles)
+        apiKeyStore.saveAPIKey(settings.groqAPIKey)
     }
 
-    private func registerDefaults() {
-        let fallback = AppSettings.defaults
-        defaults.register(defaults: [
-            Key.toggleShortcut: fallback.toggleShortcut,
-            Key.holdShortcut: fallback.holdShortcut,
-            Key.cancelShortcut: fallback.cancelShortcut,
-            Key.pasteLastShortcut: fallback.pasteLastShortcut,
-            Key.scratchpadShortcut: fallback.scratchpadShortcut,
-            Key.commandModeShortcut: fallback.commandModeShortcut,
-            Key.transcriptionProvider: fallback.transcriptionProvider.rawValue,
-            Key.transcriptionModel: fallback.transcriptionModel,
-            Key.transcriptionLanguage: AppSettings.defaultTranscriptionLanguage,
-            Key.flowBarPosition: fallback.flowBarPosition.rawValue,
-            Key.restoreClipboardAfterPaste: fallback.restoreClipboardAfterPaste,
-            Key.retentionPolicy: fallback.retentionPolicy.rawValue,
-            Key.notifications: fallback.notifications,
-            Key.styles: fallback.stylePreferences
-        ])
-    }
-
-    private func normalizeTranscriptionModel(_ model: String) -> String {
+    static func normalizeTranscriptionModel(_ model: String) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return AppSettings.defaultTranscriptionModel }
+        // Older builds stored multilingual names such as "small"; map everything unknown to the
+        // recommended English model so dictation never silently switches language.
+        return WhisperModelOption.option(for: trimmed)?.id ?? AppSettings.defaultTranscriptionModel
+    }
 
-        // v1 is English-only. Older settings such as "small" select multilingual
-        // Whisper models, which can mis-detect English speech as another language.
-        if trimmed == "small" || trimmed == "openai_whisper-small" {
-            return AppSettings.defaultTranscriptionModel
-        }
-        if trimmed.contains(".en") {
-            return trimmed
-        }
-        return AppSettings.defaultTranscriptionModel
+    private static func validShortcut(_ shortcut: String) -> String? {
+        (try? ShortcutParser.parse(shortcut)) == nil ? nil : ShortcutParser.canonical(shortcut)
     }
 }
 
@@ -197,9 +260,11 @@ final class KeychainGroqAPIKeyStore: GroqAPIKeyStoring {
     private let account = "groq-api-key"
 
     func loadAPIKey() -> String {
+        var query = baseQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(baseQuery(returnData: true), &item)
-        guard status == errSecSuccess, let data = item as? Data else {
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let data = item as? Data else {
             return ""
         }
         return String(data: data, encoding: .utf8) ?? ""
@@ -207,31 +272,23 @@ final class KeychainGroqAPIKeyStore: GroqAPIKeyStoring {
 
     func saveAPIKey(_ apiKey: String) {
         let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let query = baseQuery(returnData: false)
+        guard trimmed != loadAPIKey() else { return }
+        let query = baseQuery()
         guard !trimmed.isEmpty else {
-            SecItemDelete(query)
+            SecItemDelete(query as CFDictionary)
             return
         }
 
         let data = Data(trimmed.utf8)
-        let updateStatus = SecItemUpdate(query, [kSecValueData as String: data] as CFDictionary)
+        let updateStatus = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if updateStatus == errSecItemNotFound {
-            var addQuery = baseQueryDictionary()
+            var addQuery = query
             addQuery[kSecValueData as String] = data
             SecItemAdd(addQuery as CFDictionary, nil)
         }
     }
 
-    private func baseQuery(returnData: Bool) -> CFDictionary {
-        var query = baseQueryDictionary()
-        if returnData {
-            query[kSecReturnData as String] = true
-            query[kSecMatchLimit as String] = kSecMatchLimitOne
-        }
-        return query as CFDictionary
-    }
-
-    private func baseQueryDictionary() -> [String: Any] {
+    private func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

@@ -11,13 +11,21 @@
 		100000000000000000000102 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000202 /* AppSettings.swift */; };
 		100000000000000000000103 /* Shortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000203 /* Shortcut.swift */; };
 		100000000000000000000104 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000204 /* Models.swift */; };
-		100000000000000000000105 /* Services.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000205 /* Services.swift */; };
 		100000000000000000000106 /* AppStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000206 /* AppStateController.swift */; };
 		100000000000000000000107 /* FlowBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000207 /* FlowBar.swift */; };
 		100000000000000000000108 /* HubViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000208 /* HubViews.swift */; };
 		100000000000000000000109 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 100000000000000000000501 /* WhisperKit */; };
 		100000000000000000000110 /* ShortcutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000301 /* ShortcutTests.swift */; };
 		100000000000000000000111 /* SettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000302 /* SettingsStoreTests.swift */; };
+		100000000000000000000112 /* AudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000221 /* AudioRecorder.swift */; };
+		100000000000000000000113 /* Transcription.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000222 /* Transcription.swift */; };
+		100000000000000000000114 /* PasteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000223 /* PasteService.swift */; };
+		100000000000000000000115 /* HotKeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000224 /* HotKeyService.swift */; };
+		100000000000000000000116 /* TextProcessing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000225 /* TextProcessing.swift */; };
+		100000000000000000000117 /* SystemSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000226 /* SystemSupport.swift */; };
+		100000000000000000000118 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000227 /* LibraryViews.swift */; };
+		100000000000000000000119 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000228 /* SettingsViews.swift */; };
+		100000000000000000000120 /* TextProcessingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000303 /* TextProcessingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -35,7 +43,6 @@
 		100000000000000000000202 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		100000000000000000000203 /* Shortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shortcut.swift; sourceTree = "<group>"; };
 		100000000000000000000204 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		100000000000000000000205 /* Services.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services.swift; sourceTree = "<group>"; };
 		100000000000000000000206 /* AppStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateController.swift; sourceTree = "<group>"; };
 		100000000000000000000207 /* FlowBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlowBar.swift; sourceTree = "<group>"; };
 		100000000000000000000208 /* HubViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubViews.swift; sourceTree = "<group>"; };
@@ -44,6 +51,15 @@
 		100000000000000000000302 /* SettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStoreTests.swift; sourceTree = "<group>"; };
 		100000000000000000000701 /* Flowtype.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Flowtype.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		100000000000000000000702 /* FlowtypeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlowtypeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		100000000000000000000221 /* AudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRecorder.swift; sourceTree = "<group>"; };
+		100000000000000000000222 /* Transcription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcription.swift; sourceTree = "<group>"; };
+		100000000000000000000223 /* PasteService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteService.swift; sourceTree = "<group>"; };
+		100000000000000000000224 /* HotKeyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyService.swift; sourceTree = "<group>"; };
+		100000000000000000000225 /* TextProcessing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextProcessing.swift; sourceTree = "<group>"; };
+		100000000000000000000226 /* SystemSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSupport.swift; sourceTree = "<group>"; };
+		100000000000000000000227 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
+		100000000000000000000228 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
+		100000000000000000000303 /* TextProcessingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextProcessingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -81,10 +97,17 @@
 				100000000000000000000202 /* AppSettings.swift */,
 				100000000000000000000203 /* Shortcut.swift */,
 				100000000000000000000204 /* Models.swift */,
-				100000000000000000000205 /* Services.swift */,
 				100000000000000000000206 /* AppStateController.swift */,
 				100000000000000000000207 /* FlowBar.swift */,
 				100000000000000000000208 /* HubViews.swift */,
+				100000000000000000000221 /* AudioRecorder.swift */,
+				100000000000000000000222 /* Transcription.swift */,
+				100000000000000000000223 /* PasteService.swift */,
+				100000000000000000000224 /* HotKeyService.swift */,
+				100000000000000000000225 /* TextProcessing.swift */,
+				100000000000000000000226 /* SystemSupport.swift */,
+				100000000000000000000227 /* LibraryViews.swift */,
+				100000000000000000000228 /* SettingsViews.swift */,
 				100000000000000000000209 /* Info.plist */,
 			);
 			path = Flowtype;
@@ -95,6 +118,7 @@
 			children = (
 				100000000000000000000301 /* ShortcutTests.swift */,
 				100000000000000000000302 /* SettingsStoreTests.swift */,
+				100000000000000000000303 /* TextProcessingTests.swift */,
 			);
 			path = FlowtypeTests;
 			sourceTree = "<group>";
@@ -216,10 +240,17 @@
 				100000000000000000000102 /* AppSettings.swift in Sources */,
 				100000000000000000000103 /* Shortcut.swift in Sources */,
 				100000000000000000000104 /* Models.swift in Sources */,
-				100000000000000000000105 /* Services.swift in Sources */,
 				100000000000000000000106 /* AppStateController.swift in Sources */,
 				100000000000000000000107 /* FlowBar.swift in Sources */,
 				100000000000000000000108 /* HubViews.swift in Sources */,
+				100000000000000000000112 /* AudioRecorder.swift in Sources */,
+				100000000000000000000113 /* Transcription.swift in Sources */,
+				100000000000000000000114 /* PasteService.swift in Sources */,
+				100000000000000000000115 /* HotKeyService.swift in Sources */,
+				100000000000000000000116 /* TextProcessing.swift in Sources */,
+				100000000000000000000117 /* SystemSupport.swift in Sources */,
+				100000000000000000000118 /* LibraryViews.swift in Sources */,
+				100000000000000000000119 /* SettingsViews.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +260,7 @@
 			files = (
 				100000000000000000000110 /* ShortcutTests.swift in Sources */,
 				100000000000000000000111 /* SettingsStoreTests.swift in Sources */,
+				100000000000000000000120 /* TextProcessingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

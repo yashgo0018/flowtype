@@ -1,325 +1,309 @@
+import Charts
 import SwiftData
 import SwiftUI
 
-enum HubPage: String, CaseIterable, Identifiable {
-    case home = "Home"
-    case activity = "Recent Activity"
-    case insights = "Insights"
-    case dictionary = "Dictionary"
-    case snippets = "Snippets"
-    case styles = "Styles"
-    case scratchpad = "Scratchpad"
-    case settings = "Settings"
-
-    var id: String { rawValue }
-}
-
 struct HubRootView: View {
     @EnvironmentObject private var controller: AppStateController
-    @State private var selection: HubPage? = .home
+
+    private var selection: Binding<HubPage?> {
+        Binding(
+            get: { controller.hubPage },
+            set: { if let page = $0 { controller.hubPage = page } }
+        )
+    }
 
     var body: some View {
         NavigationSplitView {
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Flowtype")
-                        .font(.title3.bold())
-                    Text("Local Whisper - Signed out")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            List(selection: selection) {
+                Section {
+                    ForEach([HubPage.home, .history]) { page in
+                        Label(page.title, systemImage: page.systemImage).tag(page)
+                    }
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 16)
-
-                List(HubPage.allCases, selection: $selection) { page in
-                    Text(page.rawValue)
-                        .tag(page)
+                Section("Personalize") {
+                    ForEach([HubPage.dictionary, .snippets, .notes]) { page in
+                        Label(page.title, systemImage: page.systemImage).tag(page)
+                    }
                 }
-                .scrollContentBackground(.hidden)
-
-                Text("Local dictation")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Section {
+                    Label(HubPage.settings.title, systemImage: HubPage.settings.systemImage).tag(HubPage.settings)
+                }
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
+            .safeAreaInset(edge: .bottom) {
+                SidebarStatusView()
                     .padding(12)
             }
-            .frame(minWidth: 210)
-            .background(Color(nsColor: .windowBackgroundColor))
         } detail: {
             Group {
-                switch selection ?? .home {
-                case .home:
-                    HomePage()
-                case .activity:
-                    ActivityPage()
-                case .insights:
-                    InsightsPage()
-                case .dictionary:
-                    DictionaryPage()
-                case .snippets:
-                    SnippetsPage()
-                case .styles:
-                    StylesPage()
-                case .scratchpad:
-                    ScratchpadPage()
-                case .settings:
-                    SettingsPage()
+                switch controller.hubPage {
+                case .home: HomeView()
+                case .history: HistoryView()
+                case .dictionary: DictionaryView()
+                case .snippets: SnippetsView()
+                case .notes: NotesView()
+                case .settings: SettingsView()
                 }
             }
-            .environmentObject(controller)
-            .frame(minWidth: 760, minHeight: 560)
+            .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 }
 
-struct HomePage: View {
+private struct SidebarStatusView: View {
     @EnvironmentObject private var controller: AppStateController
-    @Query(sort: \TranscriptHistoryItem.createdAt, order: .reverse) private var history: [TranscriptHistoryItem]
 
     var body: some View {
-        PageContainer(title: "Good day. Ready when you are.") {
-            PermissionBanner()
-            HStack {
-                MetricCard(title: "Words dictated", value: "\(history.reduce(0) { $0 + $1.wordCount })")
-                MetricCard(title: "Sessions", value: "\(history.count)")
-                MetricCard(title: "Voice profile", value: "Local")
-            }
-            InfoCard(title: "Current shortcut", body: "Hands-free: \(controller.settings.toggleShortcut) - Push-to-talk: \(controller.settings.holdShortcut)")
-            SectionHeader("Recent activity")
-            if history.isEmpty {
-                EmptyState(title: "No recent dictations", body: "Place your cursor in any app and start speaking.")
-            } else {
-                VStack(spacing: 8) {
-                    ForEach(history.prefix(5)) { item in
-                        TranscriptRow(item: item)
-                    }
+        Button {
+            controller.hubPage = controller.needsSetup ? .home : .settings
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(statusTitle)
+                        .font(.callout.weight(.medium))
+                    Text(engineTitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                Spacer(minLength: 0)
             }
+            .padding(10)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var statusTitle: String {
+        switch controller.phase {
+        case .recording: "Listening…"
+        case .transcribing: "Transcribing…"
+        default: controller.needsSetup ? "Setup needed" : "Ready"
+        }
+    }
+
+    private var statusColor: Color {
+        if controller.phase.isRecording { return .red }
+        return controller.needsSetup ? .orange : .green
+    }
+
+    private var engineTitle: String {
+        switch controller.settings.transcriptionProvider {
+        case .local:
+            let model = WhisperModelOption.option(for: controller.settings.transcriptionModel)?.title ?? "Whisper"
+            return "On-device · \(model)"
+        case .groq:
+            return "Groq cloud · Whisper Turbo"
         }
     }
 }
 
-struct ActivityPage: View {
-    @Environment(\.modelContext) private var context
+// MARK: - Home
+
+struct HomeView: View {
+    @EnvironmentObject private var controller: AppStateController
+    @Query(sort: \DailyUsage.day, order: .reverse) private var usage: [DailyUsage]
     @Query(sort: \TranscriptHistoryItem.createdAt, order: .reverse) private var history: [TranscriptHistoryItem]
-    @State private var query = ""
-
-    var filtered: [TranscriptHistoryItem] {
-        guard !query.isEmpty else { return history }
-        return history.filter { $0.transcript.localizedCaseInsensitiveContains(query) }
-    }
 
     var body: some View {
-        PageContainer(title: "Recent Activity") {
-            HStack {
-                TextField("Search transcripts", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                Button("Clear history") {
-                    for item in history {
-                        context.delete(item)
-                    }
-                    saveContext(context)
+        PageScrollView(spacing: 24) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(greeting)
+                    .font(.system(size: 30, weight: .bold))
+                HowToDictateView()
+            }
+
+            if showsSetup {
+                SetupChecklist()
+            }
+
+            StatsGrid(usage: usage)
+
+            Card {
+                VStack(alignment: .leading, spacing: 12) {
+                    CardTitle("Words per day", subtitle: "Last 14 days")
+                    UsageChart(usage: usage)
+                        .frame(height: 160)
                 }
             }
-            if filtered.isEmpty {
-                EmptyState(title: "No matching transcripts", body: "History is local to this native app.")
-            } else {
-                Table(filtered) {
-                    TableColumn("Time") { Text($0.createdAt.formatted(date: .abbreviated, time: .shortened)) }
-                    TableColumn("Result") { Text($0.pasted ? "Pasted" : "Copied") }
-                    TableColumn("Words") { Text("\($0.wordCount)") }
-                    TableColumn("Transcript") { Text($0.transcript).lineLimit(2) }
-                }
-                .frame(minHeight: 360)
-            }
-        }
-    }
-}
 
-struct InsightsPage: View {
-    @Query private var usage: [DailyUsage]
-    @Query private var history: [TranscriptHistoryItem]
-    @State private var tab = "Your Usage"
-
-    var body: some View {
-        PageContainer(title: "Insights") {
-            Picker("Tab", selection: $tab) {
-                Text("Your Usage").tag("Your Usage")
-                Text("Leaderboard").tag("Leaderboard")
-            }
-            .pickerStyle(.segmented)
-
-            if tab == "Your Usage" {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    MetricCard(title: "Total words", value: "\(history.reduce(0) { $0 + $1.wordCount })")
-                    MetricCard(title: "Dictations", value: "\(history.count)")
-                    MetricCard(title: "Words/min", value: "Local")
-                    MetricCard(title: "Streak", value: "\(currentStreak) days")
+                    Text("Recent")
+                        .font(.title3.weight(.semibold))
+                    Spacer()
+                    if !history.isEmpty {
+                        Button("View all") { controller.hubPage = .history }
+                            .buttonStyle(.link)
+                    }
                 }
-                InfoCard(title: "Desktop usage", body: "Pasted \(history.filter(\.pasted).count) - Copied \(history.filter { !$0.pasted }.count)")
-                InfoCard(title: "Usage heatmap", body: usage.sorted { $0.day > $1.day }.prefix(42).map { $0.words > 0 ? "■" : "□" }.joined(separator: " "))
+                if history.isEmpty {
+                    Card {
+                        EmptyStateView(
+                            systemImage: "waveform",
+                            title: "No dictations yet",
+                            message: "Click into any text field, then use your shortcut and start talking."
+                        )
+                    }
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(history.prefix(5)) { item in
+                            TranscriptRow(item: item)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var showsSetup: Bool {
+        controller.needsSetup || !controller.permissions.microphoneGranted
+            || (controller.settings.transcriptionProvider == .local && !controller.modelStatus.isReady)
+            || controller.modelActivity != nil
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: .now)
+        switch hour {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        default: return "Good evening"
+        }
+    }
+}
+
+struct HowToDictateView: View {
+    @EnvironmentObject private var controller: AppStateController
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if controller.settings.holdKey != .off {
+                Text("Hold")
+                KeyCapsView(keys: [controller.settings.holdKey.symbol])
+                Text("to talk, or press")
             } else {
-                EmptyState(title: "No leaderboard available", body: "Usage insights are currently limited to this Mac.")
+                Text("Press")
             }
+            KeyCapsView(keys: ShortcutParser.symbols(controller.settings.toggleShortcut))
+            Text("to start and stop.")
         }
-    }
-
-    private var currentStreak: Int {
-        let days = Set(usage.map(\.day)).sorted(by: >)
-        guard !days.isEmpty else { return 0 }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        var previous: Date?
-        var streak = 0
-        for day in days {
-            guard let date = formatter.date(from: day) else { continue }
-            if previous == nil || Calendar.current.dateComponents([.day], from: date, to: previous!).day == 1 {
-                streak += 1
-                previous = date
-            } else {
-                break
-            }
-        }
-        return streak
+        .font(.body)
+        .foregroundStyle(.secondary)
     }
 }
 
-struct DictionaryPage: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \DictionaryEntry.phrase) private var entries: [DictionaryEntry]
-    @State private var phrase = ""
-    @State private var replacement = ""
-    @State private var query = ""
+private struct StatsGrid: View {
+    let usage: [DailyUsage]
 
-    var filtered: [DictionaryEntry] {
-        guard !query.isEmpty else { return entries }
-        return entries.filter { $0.phrase.localizedCaseInsensitiveContains(query) || $0.replacement.localizedCaseInsensitiveContains(query) }
+    var body: some View {
+        let stats = UsageStats(usage: usage)
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+            StatTile(title: "Words dictated", value: stats.totalWords.formatted(), systemImage: "text.word.spacing")
+            StatTile(title: "Speaking pace", value: stats.wordsPerMinute.map { "\($0) wpm" } ?? "—", systemImage: "speedometer")
+            StatTile(title: "Time saved", value: stats.timeSavedText, systemImage: "hourglass")
+            StatTile(title: "Day streak", value: "\(stats.streak)", systemImage: "flame")
+        }
+    }
+}
+
+struct UsageStats {
+    let totalWords: Int
+    let wordsPerMinute: Int?
+    let timeSavedMinutes: Double
+    let streak: Int
+
+    /// Average typing speed used to estimate time saved.
+    static let typingWordsPerMinute = 40.0
+
+    init(usage: [DailyUsage], now: Date = .now, calendar: Calendar = .current) {
+        totalWords = usage.reduce(0) { $0 + $1.words }
+
+        // Older rows have no recorded duration; leave them out of pace calculations.
+        let timed = usage.filter { $0.dictationSeconds > 0 }
+        let timedWords = Double(timed.reduce(0) { $0 + $1.words })
+        let timedMinutes = timed.reduce(0) { $0 + $1.dictationSeconds } / 60
+        wordsPerMinute = timedMinutes > 0.25 ? Int((timedWords / timedMinutes).rounded()) : nil
+        timeSavedMinutes = max(0, timedWords / Self.typingWordsPerMinute - timedMinutes)
+        streak = TextMetrics.streak(dayKeys: Set(usage.filter { $0.words > 0 }.map(\.day)), today: now, calendar: calendar)
+    }
+
+    var timeSavedText: String {
+        let minutes = Int(timeSavedMinutes.rounded())
+        if minutes < 1 { return "—" }
+        if minutes < 60 { return "\(minutes) min" }
+        return "\(minutes / 60)h \(minutes % 60)m"
+    }
+}
+
+private struct UsageChart: View {
+    let usage: [DailyUsage]
+
+    private struct Point: Identifiable {
+        let date: Date
+        let words: Int
+        var id: Date { date }
+    }
+
+    private var points: [Point] {
+        let calendar = Calendar.current
+        let byDay = Dictionary(usage.map { ($0.day, $0.words) }, uniquingKeysWith: +)
+        let today = calendar.startOfDay(for: .now)
+        return (0..<14).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            return Point(date: date, words: byDay[TextMetrics.dayKey(for: date)] ?? 0)
+        }
     }
 
     var body: some View {
-        PageContainer(title: "Dictionary") {
-            InfoCard(title: "Teach Flow your words", body: "Add words and corrections you want Flowtype to recognize consistently.")
-            HStack {
-                TextField("Search dictionary", text: $query).textFieldStyle(.roundedBorder)
-                TextField("Phrase", text: $phrase).textFieldStyle(.roundedBorder)
-                TextField("Correction", text: $replacement).textFieldStyle(.roundedBorder)
-                Button("Add") {
-                    context.insert(DictionaryEntry(phrase: phrase, replacement: replacement))
-                    phrase = ""
-                    replacement = ""
-                    saveContext(context)
-                }
-                .disabled(phrase.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        Chart(points) { point in
+            BarMark(
+                x: .value("Day", point.date, unit: .day),
+                y: .value("Words", point.words)
+            )
+            .foregroundStyle(Color.accentColor.gradient)
+            .cornerRadius(4)
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .day, count: 2)) { _ in
+                AxisValueLabel(format: .dateTime.day().month(.abbreviated))
             }
-            Table(filtered) {
-                TableColumn("Phrase", value: \.phrase)
-                TableColumn("Correction", value: \.replacement)
-                TableColumn("Uses") { Text("\($0.usageCount)") }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading) { _ in
+                AxisGridLine()
+                AxisValueLabel()
             }
-            .frame(minHeight: 360)
         }
     }
 }
 
-struct SnippetsPage: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \Snippet.trigger) private var snippets: [Snippet]
-    @State private var trigger = ""
-    @State private var expansion = ""
+// MARK: - Setup
 
-    var body: some View {
-        PageContainer(title: "Snippets") {
-            InfoCard(title: "Say it once", body: "Voice triggers expand into saved text blocks stored on this Mac.")
-            HStack {
-                TextField("Trigger", text: $trigger).textFieldStyle(.roundedBorder)
-                TextField("Expansion", text: $expansion).textFieldStyle(.roundedBorder)
-                Button("Add") {
-                    context.insert(Snippet(trigger: trigger, expansion: expansion))
-                    trigger = ""
-                    expansion = ""
-                    saveContext(context)
-                }
-                .disabled(trigger.isEmpty || expansion.isEmpty)
-            }
-            Table(snippets) {
-                TableColumn("Scope", value: \.scope)
-                TableColumn("Trigger", value: \.trigger)
-                TableColumn("Expansion", value: \.expansion)
-            }
-            .frame(minHeight: 360)
-        }
-    }
-}
-
-struct StylesPage: View {
+struct SetupChecklist: View {
     @EnvironmentObject private var controller: AppStateController
-    @State private var category = WritingStyleScope.personal
-
-    private let styles = ["Formal", "Casual", "Very Casual", "Excited"]
 
     var body: some View {
-        PageContainer(title: "Styles") {
-            InfoCard(title: "English-only personalization", body: "Choose a tone preference for each app category.")
-            Picker("Category", selection: $category) {
-                ForEach(WritingStyleScope.allCases) { scope in
-                    Text(scope.rawValue.capitalized).tag(scope)
-                }
-            }
-            .pickerStyle(.segmented)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220))], spacing: 12) {
-                ForEach(styles, id: \.self) { style in
-                    Button {
-                        var next = controller.settings
-                        next.stylePreferences[category.rawValue] = style
-                        controller.saveSettings(next)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(style).font(.headline)
-                            Text(stylePreview(style)).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 100, alignment: .leading)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
-        }
-    }
-}
-
-struct ScratchpadPage: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \ScratchpadNote.updatedAt, order: .reverse) private var notes: [ScratchpadNote]
-    @State private var title = ""
-    @State private var bodyText = ""
-
-    var body: some View {
-        PageContainer(title: "Scratchpad") {
-            InfoCard(title: "Quick notes", body: "Capture drafts and notes locally while dictating.")
-            HStack(alignment: .top, spacing: 16) {
-                List(notes) { note in
-                    VStack(alignment: .leading) {
-                        Text(note.title).font(.headline)
-                        Text(note.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(width: 220)
-                .frame(minHeight: 420)
-                VStack {
-                    TextField("Title", text: $title).textFieldStyle(.roundedBorder)
-                    TextEditor(text: $bodyText)
-                        .frame(minHeight: 320)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-                    HStack {
-                        ForEach(["More concise", "Professional", "Casual", "List", "Polish"], id: \.self) { chip in
-                            Button(chip) {}
-                                .disabled(true)
-                        }
-                        Spacer()
-                        Button("Save") {
-                            context.insert(ScratchpadNote(title: title, body: bodyText))
-                            title = ""
-                            bodyText = ""
-                            saveContext(context)
-                        }
+        Card {
+            VStack(alignment: .leading, spacing: 14) {
+                CardTitle("Finish setting up", subtitle: "Flowtype needs a couple of permissions to type for you.")
+                PermissionRows()
+                Divider()
+                ModelSetupRow()
+                if controller.settings.holdKey == .fn, FnKeyUsage.opensSystemFeature {
+                    Divider()
+                    SetupRow(
+                        systemImage: "globe",
+                        title: "Stop the Fn key opening emoji",
+                        detail: "In Keyboard settings, set “Press 🌐 key to” to “Do Nothing” so holding Fn only dictates.",
+                        isDone: false
+                    ) {
+                        Button("Open Keyboard Settings") { PermissionService.openKeyboardSettings() }
                     }
                 }
             }
@@ -327,299 +311,333 @@ struct ScratchpadPage: View {
     }
 }
 
-struct SettingsPage: View {
+struct PermissionRows: View {
     @EnvironmentObject private var controller: AppStateController
-    @State private var draft = AppSettings.defaults
 
     var body: some View {
-        PageContainer(title: "Settings") {
-            TabView {
-                Form {
-                    Picker("Flow Bar position", selection: $draft.flowBarPosition) {
-                        Text("Bottom right").tag(FlowBarPosition.bottomRight)
-                        Text("Bottom center").tag(FlowBarPosition.bottomCenter)
-                    }
+        VStack(alignment: .leading, spacing: 14) {
+            SetupRow(
+                systemImage: "mic",
+                title: "Microphone",
+                detail: "To hear what you say. Audio never leaves your Mac with on-device transcription.",
+                isDone: controller.permissions.microphoneGranted
+            ) {
+                Button(controller.permissions.microphone == .notDetermined ? "Allow" : "Open Settings") {
+                    controller.requestMicrophoneAccess()
                 }
-                .tabItem { Text("General") }
-
-                Form {
-                    TextField("Hands-free toggle", text: $draft.toggleShortcut)
-                    TextField("Push-to-talk", text: $draft.holdShortcut)
-                    TextField("Cancel", text: $draft.cancelShortcut)
-                    TextField("Paste last", text: $draft.pasteLastShortcut)
-                    TextField("Open Scratchpad", text: $draft.scratchpadShortcut)
-                    TextField("Command Mode", text: $draft.commandModeShortcut)
-                }
-                .tabItem { Text("Shortcuts") }
-
-                Form {
-                    Section("Transcription") {
-                        Picker("Provider", selection: $draft.transcriptionProvider) {
-                            Text("Local WhisperKit").tag(TranscriptionProvider.local)
-                            Text("Groq").tag(TranscriptionProvider.groq)
-                        }
-                        if draft.transcriptionProvider == .local {
-                            TextField("Whisper model", text: $draft.transcriptionModel)
-                        } else {
-                            LabeledContent("Groq model") {
-                                Text(AppSettings.groqTranscriptionModel)
-                                    .textSelection(.enabled)
-                            }
-                            SecureField("Groq API key", text: $draft.groqAPIKey)
-                        }
-                        LabeledContent("Language") {
-                            Text("English")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    ModelDownloadSection(draft: $draft)
-                }
-                .tabItem { Text("Audio") }
-
-                Form {
-                    Toggle("Restore previous clipboard after paste", isOn: $draft.restoreClipboardAfterPaste)
-                    Picker("Data Storage", selection: $draft.retentionPolicy) {
-                        Text("Store normally").tag(RetentionPolicy.normal)
-                        Text("Auto-delete after 24 hours").tag(RetentionPolicy.twentyFourHours)
-                        Text("Never store transcripts").tag(RetentionPolicy.never)
-                    }
-                }
-                .tabItem { Text("Data & Privacy") }
-
-                VStack(alignment: .leading) {
-                    InfoCard(title: "Signed out", body: "Account features are unavailable in this local build.")
-                    InfoCard(title: "Local data", body: "Transcription history stays on this device and does not sync.")
-                }
-                .padding()
-                .tabItem { Text("Account") }
             }
-            .frame(minHeight: 430)
-            HStack {
-                Button("Request permissions") { controller.requestPermissions() }
-                Spacer()
-                Button("Save and apply") { controller.saveSettings(draft) }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .onAppear {
-            draft = controller.settings
-            controller.refreshModelStatus(for: draft)
-        }
-        .onChange(of: draft.transcriptionModel) {
-            controller.refreshModelStatus(for: draft)
-        }
-        .onChange(of: draft.transcriptionProvider) {
-            controller.refreshModelStatus(for: draft)
-        }
-        .onChange(of: draft.groqAPIKey) {
-            controller.refreshModelStatus(for: draft)
-        }
-    }
-}
-
-struct ModelDownloadSection: View {
-    @EnvironmentObject private var controller: AppStateController
-    @Binding var draft: AppSettings
-
-    var body: some View {
-        Section(draft.transcriptionProvider == .local ? "Local model" : "Groq") {
-            LabeledContent(draft.transcriptionProvider == .local ? "Resolved model" : "Selected model") {
-                Text(controller.modelStatus.modelName)
-                    .textSelection(.enabled)
-            }
-            LabeledContent("Status") {
+            SetupRow(
+                systemImage: "keyboard",
+                title: "Accessibility",
+                detail: "To paste text into the app you're using and listen for your shortcut.",
+                isDone: controller.permissions.accessibility
+            ) {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(controller.modelStatus.isDownloaded ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-                    Text(statusText)
-                        .foregroundStyle(controller.modelStatus.isDownloaded ? .primary : .secondary)
+                    Button("Allow") { controller.requestAccessibilityAccess() }
+                    Button("Already on?") { controller.resetAccessibilityAccess() }
+                        .help("If Flowtype is already switched on in System Settings but still not working, this clears the stale entry and asks again.")
                 }
             }
-            if let localPath = controller.modelStatus.localPath, controller.modelStatus.isDownloaded {
-                LabeledContent("Local path") {
-                    Text(localPath)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                }
+        }
+    }
+}
+
+private struct ModelSetupRow: View {
+    @EnvironmentObject private var controller: AppStateController
+
+    var body: some View {
+        switch controller.settings.transcriptionProvider {
+        case .local:
+            let option = WhisperModelOption.option(for: controller.settings.transcriptionModel)
+            SetupRow(
+                systemImage: "cpu",
+                title: "Speech model",
+                detail: controller.modelError ?? "\(option?.title ?? "Whisper") runs privately on your Mac. \(option?.detail ?? "")",
+                isDone: controller.modelStatus.isReady && controller.modelActivity == nil
+            ) {
+                ModelDownloadButton()
             }
-            if !controller.modelDownloadMessage.isEmpty {
-                Text(controller.modelDownloadMessage)
-                    .font(.caption)
+        case .groq:
+            SetupRow(
+                systemImage: "cloud",
+                title: "Groq API key",
+                detail: "Needed for cloud transcription.",
+                isDone: controller.settings.hasGroqAPIKey
+            ) {
+                Button("Add Key") { controller.hubPage = .settings }
+            }
+        }
+    }
+}
+
+struct ModelDownloadButton: View {
+    @EnvironmentObject private var controller: AppStateController
+
+    var body: some View {
+        switch controller.modelActivity {
+        case .downloading(let fraction):
+            HStack(spacing: 8) {
+                ProgressView(value: fraction)
+                    .frame(width: 110)
+                Text("\(Int(fraction * 100))%")
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            HStack {
-                Button("Refresh status") {
-                    controller.refreshModelStatus(for: draft)
-                }
-                Spacer()
-                if draft.transcriptionProvider == .local {
-                    Button {
-                        controller.downloadModel(for: draft)
-                    } label: {
-                        if controller.isDownloadingModel {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Downloading...")
-                        } else {
-                            Text("Download model")
-                        }
-                    }
-                    .disabled(controller.modelStatus.isDownloaded || controller.isDownloadingModel)
-                }
+        case .loading:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text("Loading…").foregroundStyle(.secondary)
+            }
+        case nil:
+            if !controller.modelStatus.isReady {
+                Button("Download") { controller.prepareModel() }
             }
         }
     }
-
-    private var statusText: String {
-        switch draft.transcriptionProvider {
-        case .local:
-            controller.modelStatus.isDownloaded ? "Downloaded" : "Will download on next dictation"
-        case .groq:
-            controller.modelStatus.isDownloaded ? "API key configured" : "API key required"
-        }
-    }
 }
 
-struct PermissionBanner: View {
-    @EnvironmentObject private var controller: AppStateController
+struct SetupRow<Accessory: View>: View {
+    let systemImage: String
+    let title: String
+    let detail: String
+    let isDone: Bool
+    @ViewBuilder let accessory: Accessory
 
     var body: some View {
-        if controller.permissionsMessage.isEmpty {
-            InfoCard(title: "Ready to Flow", body: "Place your cursor in any app, then use your shortcut or hold-to-talk.")
-        } else {
-            InfoCard(title: "Permission needed", body: controller.permissionsMessage)
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : systemImage)
+                .font(.system(size: 18))
+                .foregroundStyle(isDone ? Color.green : Color.accentColor)
+                .frame(width: 26)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            if !isDone {
+                accessory
+            }
         }
     }
 }
 
-struct PageContainer<Content: View>: View {
+enum FnKeyUsage {
+    /// Whether pressing Fn/Globe also triggers a system feature (emoji picker, input source, Apple dictation).
+    static var opensSystemFeature: Bool {
+        let value = CFPreferencesCopyAppValue("AppleFnUsageType" as CFString, "com.apple.HIToolbox" as CFString) as? Int
+        return value != 0
+    }
+}
+
+// MARK: - Shared components
+
+struct Card<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.07))
+            )
+    }
+}
+
+struct CardTitle: View {
     let title: String
+    let subtitle: String?
+
+    init(_ title: String, subtitle: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.headline)
+            if let subtitle {
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct StatTile: View {
+    let title: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(title, systemImage: systemImage)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+        }
+    }
+}
+
+struct KeyCapsView: View {
+    let keys: [String]
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, key in
+                Text(key)
+                    .font(.system(size: 12, weight: .medium, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 22, minHeight: 20)
+                    .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.18))
+                    )
+                    .shadow(color: .black.opacity(0.08), radius: 0, y: 1)
+            }
+        }
+    }
+}
+
+/// Scrolling page body with the Hub's standard padding and readable width.
+struct PageScrollView<Content: View>: View {
+    var spacing: CGFloat = 20
     @ViewBuilder let content: Content
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(title)
-                    .font(.largeTitle.bold())
+            VStack(alignment: .leading, spacing: spacing) {
                 content
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(28)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
     }
 }
 
-struct MetricCard: View {
+struct PageHeader<Accessory: View>: View {
     let title: String
-    let value: String
+    let subtitle: String
+    @ViewBuilder let accessory: Accessory
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title.bold())
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 26, weight: .bold))
+                Text(subtitle).foregroundStyle(.secondary)
+            }
+            Spacer()
+            accessory
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
     }
 }
 
-struct InfoCard: View {
+extension PageHeader where Accessory == EmptyView {
+    init(title: String, subtitle: String) {
+        self.init(title: title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+struct EmptyStateView: View {
+    let systemImage: String
     let title: String
     let message: String
 
-    init(title: String, body: String) {
-        self.title = title
-        self.message = body
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
             Text(title).font(.headline)
-            Text(message).foregroundStyle(.secondary)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.blue.opacity(0.12)))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
     }
 }
 
 struct TranscriptRow: View {
+    @EnvironmentObject private var controller: AppStateController
+    @Environment(\.modelContext) private var context
     let item: TranscriptHistoryItem
+    var showsDate = true
+    @State private var isHovering = false
+    @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(item.pasted ? "Pasted" : "Copied")
-                    .font(.caption.bold())
-                Spacer()
-                Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(item.transcript)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    Text(showsDate
+                         ? item.createdAt.formatted(date: .abbreviated, time: .shortened)
+                         : item.createdAt.formatted(date: .omitted, time: .shortened))
+                    Text("·")
+                    Text("\(item.wordCount) words")
+                    if !item.pasted {
+                        Text("·")
+                        Text("Copied")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            Text(item.transcript).lineLimit(2)
+            Spacer(minLength: 8)
+            HStack(spacing: 4) {
+                Button {
+                    controller.copyToClipboard(item.transcript)
+                    copied = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        copied = false
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .frame(width: 16)
+                }
+                .help("Copy")
+                Button(role: .destructive) {
+                    context.delete(item)
+                    try? context.save()
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .help("Delete")
+            }
+            .buttonStyle(.borderless)
+            .opacity(isHovering || copied ? 1 : 0)
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-    }
-}
-
-struct EmptyState: View {
-    let title: String
-    let message: String
-
-    init(title: String, body: String) {
-        self.title = title
-        self.message = body
-    }
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text(title).font(.headline)
-            Text(message).foregroundStyle(.secondary)
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.07))
+        )
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button("Copy") { controller.copyToClipboard(item.transcript) }
+            Button("Delete", role: .destructive) {
+                context.delete(item)
+                try? context.save()
+            }
         }
-        .frame(maxWidth: .infinity, minHeight: 180)
-        .background(.background, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.quaternary))
-    }
-}
-
-struct SectionHeader: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        Text(text).font(.headline)
-    }
-}
-
-private func stylePreview(_ style: String) -> String {
-    switch style {
-    case "Formal":
-        "Thank you for your message. I will follow up shortly."
-    case "Casual":
-        "Thanks, I'll get back to you soon."
-    case "Very Casual":
-        "sounds good, i'll reply soon"
-    case "Excited":
-        "Thanks! I'll take a look and follow up soon!"
-    default:
-        ""
-    }
-}
-
-private func saveContext(_ context: ModelContext) {
-    do {
-        try context.save()
-    } catch {
-        NSLog("Flowtype local data save failed: \(error.localizedDescription)")
     }
 }

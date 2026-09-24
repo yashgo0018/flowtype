@@ -34,9 +34,9 @@ enum ShortcutError: LocalizedError, Equatable {
         case .missingKey(let shortcut):
             "Shortcut '\(shortcut)' is missing a non-modifier key."
         case .unsupportedKey(let key):
-            "Shortcut key '\(key)' is not supported yet."
+            "The key '\(key)' can't be used in a shortcut."
         case .missingModifier(let shortcut):
-            "Shortcut '\(shortcut)' needs a modifier unless it is a function key."
+            "Shortcut '\(ShortcutParser.display(shortcut))' needs a modifier such as ⌃, ⌥ or ⌘."
         case .registrationFailed(let message):
             message
         }
@@ -51,47 +51,59 @@ enum ShortcutParser {
         "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
         "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44,
         "n": 45, "m": 46, ".": 47, "space": 49, "`": 50, "escape": 53,
+        "return": 36, "tab": 48, "delete": 51,
+        "left": 123, "right": 124, "down": 125, "up": 126,
         "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96, "f6": 97, "f7": 98,
         "f8": 100, "f9": 101, "f10": 109, "f11": 103, "f12": 111, "f13": 105,
         "f14": 107, "f15": 113, "f16": 106, "f17": 64, "f18": 79, "f19": 80, "f20": 90
     ]
 
-    static func parse(_ shortcut: String, allowBareEscape: Bool = false) throws -> ParsedShortcut {
-        let parts = shortcutParts(shortcut)
+    private static let keyNames: [UInt16: String] = Dictionary(uniqueKeysWithValues: keyCodes.map { ($1, $0) })
+
+    private static let modifierAliases = [
+        "ctrl": "ctrl", "control": "ctrl",
+        "cmd": "cmd", "command": "cmd", "super": "cmd",
+        "opt": "option", "option": "option", "alt": "option",
+        "shift": "shift"
+    ]
+
+    static func parse(_ shortcut: String, allowBareKey: Bool = false) throws -> ParsedShortcut {
         var modifiers = NSEvent.ModifierFlags()
         var keyName: String?
 
-        for part in parts {
-            switch part {
-            case "ctrl", "control":
-                modifiers.insert(.control)
-            case "cmd", "command", "super":
-                modifiers.insert(.command)
-            case "opt", "option", "alt":
-                modifiers.insert(.option)
-            case "shift":
-                modifiers.insert(.shift)
-            default:
-                keyName = keyAlias(part)
+        for part in shortcutParts(shortcut) {
+            switch modifierAliases[part] {
+            case "ctrl": modifiers.insert(.control)
+            case "cmd": modifiers.insert(.command)
+            case "option": modifiers.insert(.option)
+            case "shift": modifiers.insert(.shift)
+            default: keyName = keyAlias(part)
             }
         }
 
         guard let keyName else { throw ShortcutError.missingKey(shortcut) }
         guard let keyCode = keyCodes[keyName] else { throw ShortcutError.unsupportedKey(keyName) }
-        if modifiers.isEmpty && !keyName.hasPrefix("f") && !(allowBareEscape && keyName == "escape") {
+        if modifiers.isEmpty && !isFunctionKey(keyName) && !allowBareKey {
             throw ShortcutError.missingModifier(shortcut)
         }
 
         return ParsedShortcut(keyCode: keyCode, modifiers: modifiers)
     }
 
+    /// Builds a shortcut string from a key event, e.g. while the user records a new shortcut.
+    static func shortcut(from event: NSEvent) -> String? {
+        guard let keyName = keyNames[event.keyCode] else { return nil }
+        var parts: [String] = []
+        let flags = event.modifierFlags
+        if flags.contains(.command) { parts.append("cmd") }
+        if flags.contains(.control) { parts.append("ctrl") }
+        if flags.contains(.option) { parts.append("option") }
+        if flags.contains(.shift) { parts.append("shift") }
+        parts.append(keyName)
+        return parts.joined(separator: "+")
+    }
+
     static func canonical(_ shortcut: String) -> String {
-        let modifierAliases = [
-            "ctrl": "ctrl", "control": "ctrl",
-            "cmd": "cmd", "command": "cmd", "super": "cmd",
-            "opt": "option", "option": "option", "alt": "option",
-            "shift": "shift"
-        ]
         let modifierOrder = ["cmd", "ctrl", "option", "shift"]
         var modifiers = Set<String>()
         var keyName: String?
@@ -114,7 +126,7 @@ enum ShortcutParser {
     static func conflicts(_ bindings: [String: String]) -> [String] {
         var seen: [String: String] = [:]
         var conflicts: [String] = []
-        for (label, shortcut) in bindings {
+        for (label, shortcut) in bindings.sorted(by: { $0.key < $1.key }) {
             let canonical = canonical(shortcut)
             guard !canonical.isEmpty else { continue }
             if let previous = seen[canonical] {
@@ -126,28 +138,46 @@ enum ShortcutParser {
         return conflicts.sorted()
     }
 
-    static func matches(_ event: NSEvent, shortcut: ParsedShortcut) -> Bool {
-        guard event.keyCode == shortcut.keyCode else { return false }
-        let relevant: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-        return event.modifierFlags.intersection(relevant) == shortcut.modifiers
+    /// Mac-style key cap symbols in the conventional ⌃⌥⇧⌘ order, e.g. ["⌃", "⌥", "Space"].
+    static func symbols(_ shortcut: String) -> [String] {
+        let canonicalParts = canonical(shortcut).split(separator: "+").map(String.init)
+        guard !canonicalParts.isEmpty else { return [] }
+        let modifierSymbols = ["ctrl": "⌃", "option": "⌥", "shift": "⇧", "cmd": "⌘"]
+        var result = ["ctrl", "option", "shift", "cmd"]
+            .filter { canonicalParts.contains($0) }
+            .compactMap { modifierSymbols[$0] }
+        if let key = canonicalParts.last, modifierSymbols[key] == nil {
+            result.append(keySymbol(key))
+        }
+        return result
     }
 
     static func display(_ shortcut: String) -> String {
-        let labels = [
-            "ctrl": "Ctrl", "control": "Ctrl",
-            "cmd": "Cmd", "command": "Cmd", "super": "Cmd",
-            "opt": "Option", "option": "Option", "alt": "Option",
-            "shift": "Shift", "space": "Space", "spacebar": "Space",
-            "fn": "Fn", "function": "Fn", "globe": "Fn",
-            "esc": "Esc", "escape": "Esc"
-        ]
-        return shortcutParts(shortcut)
-            .map { labels[$0] ?? ($0.hasPrefix("f") ? $0.uppercased() : $0) }
-            .joined(separator: "+")
+        symbols(shortcut).joined()
+    }
+
+    private static func keySymbol(_ key: String) -> String {
+        switch key {
+        case "space": "Space"
+        case "escape": "Esc"
+        case "return": "↩"
+        case "tab": "⇥"
+        case "delete": "⌫"
+        case "left": "←"
+        case "right": "→"
+        case "up": "↑"
+        case "down": "↓"
+        default: key.uppercased()
+        }
+    }
+
+    private static func isFunctionKey(_ key: String) -> Bool {
+        key.count > 1 && key.hasPrefix("f") && Int(key.dropFirst()) != nil
     }
 
     private static func shortcutParts(_ shortcut: String) -> [String] {
-        shortcut.replacingOccurrences(of: "-", with: "+")
+        // Only "+" separates parts: "-" is a real key ("cmd+-").
+        shortcut
             .split(separator: "+")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
@@ -155,14 +185,11 @@ enum ShortcutParser {
 
     private static func keyAlias(_ key: String) -> String {
         switch key {
-        case " ", "spacebar":
-            "space"
-        case "esc":
-            "escape"
-        case "function", "globe":
-            "fn"
-        default:
-            key
+        case " ", "spacebar": "space"
+        case "esc": "escape"
+        case "enter": "return"
+        case "backspace": "delete"
+        default: key
         }
     }
 }

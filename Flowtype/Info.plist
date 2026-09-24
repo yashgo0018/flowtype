@@ -15,7 +15,7 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -24,8 +24,6 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Flowtype records microphone audio locally so it can transcribe your speech.</string>
-	<key>NSAppleEventsUsageDescription</key>
-	<string>Flowtype can paste transcribed text into the app you are using.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

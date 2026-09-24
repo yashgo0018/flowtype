@@ -1,60 +1,148 @@
+import AppKit
+import Combine
 import Foundation
-import SwiftData
 
-enum DictationState: Equatable {
-    case idle(String)
+enum RecordingMode: Equatable {
+    case handsFree
+    case pushToTalk
+}
+
+struct Feedback: Equatable {
+    enum Kind: Equatable {
+        case success
+        case info
+        case warning
+        case error
+    }
+
+    enum Action: Equatable {
+        case openHub(HubPage)
+        case openAccessibilitySettings
+        case openMicrophoneSettings
+    }
+
+    let kind: Kind
+    let title: String
+    var detail: String?
+    var action: Action?
+    let id = UUID()
+}
+
+enum DictationPhase: Equatable {
+    case idle
     case recording(mode: RecordingMode, startedAt: Date)
-    case processing
-    case pasting
-    case cancelled
-    case error(String)
+    case transcribing
+    case finished(Feedback)
 
-    var statusText: String {
+    var isBusy: Bool {
         switch self {
-        case .idle(let message):
-            message
-        case .recording:
-            "Recording"
-        case .processing:
-            "Transcribing..."
-        case .pasting:
-            "Pasting..."
-        case .cancelled:
-            "Cancelled"
-        case .error(let message):
-            message
+        case .recording, .transcribing: true
+        case .idle, .finished: false
+        }
+    }
+
+    var isRecording: Bool {
+        if case .recording = self { return true }
+        return false
+    }
+}
+
+enum ModelActivity: Equatable {
+    case downloading(Double)
+    case loading
+}
+
+enum HubPage: String, CaseIterable, Identifiable, Hashable {
+    case home
+    case history
+    case dictionary
+    case snippets
+    case notes
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .home: "Home"
+        case .history: "History"
+        case .dictionary: "Dictionary"
+        case .snippets: "Snippets"
+        case .notes: "Notes"
+        case .settings: "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .home: "house"
+        case .history: "clock.arrow.circlepath"
+        case .dictionary: "character.book.closed"
+        case .snippets: "text.badge.plus"
+        case .notes: "note.text"
+        case .settings: "gearshape"
         }
     }
 }
 
-enum RecordingMode: Equatable {
-    case toggle
-    case hold
+/// Recent microphone levels for the Flow Bar waveform. Kept separate from the controller so
+/// 30+ updates per second don't re-render the Hub.
+@MainActor
+final class AudioLevelMeter: ObservableObject {
+    static let barCount = 24
+    @Published private(set) var levels: [Float] = Array(repeating: 0, count: barCount)
+
+    func push(_ level: Float) {
+        var next = levels
+        next.removeFirst()
+        // Light smoothing so bars move fluidly rather than flicker.
+        next.append(level * 0.75 + (levels.last ?? 0) * 0.25)
+        levels = next
+    }
+
+    func reset() {
+        levels = Array(repeating: 0, count: Self.barCount)
+    }
 }
 
 @MainActor
 final class AppStateController: ObservableObject {
-    @Published private(set) var state: DictationState = .idle("Ready")
-    @Published var settings: AppSettings
-    @Published var permissionsMessage: String = ""
+    @Published private(set) var phase: DictationPhase = .idle {
+        didSet { hotKeys.setCancelEnabled(phase.isBusy) }
+    }
+    @Published private(set) var settings: AppSettings
+    @Published private(set) var permissions: PermissionStatus
     @Published private(set) var modelStatus: TranscriptionModelStatus
-    @Published private(set) var isDownloadingModel = false
-    @Published private(set) var modelDownloadMessage = ""
+    @Published private(set) var modelActivity: ModelActivity?
+    @Published private(set) var modelError: String?
+    @Published private(set) var shortcutWarning: String?
+    @Published private(set) var lastTranscript: String?
+    @Published var hubPage: HubPage = .home
+
+    let levelMeter = AudioLevelMeter()
+    /// Asks the app to show the Hub window.
+    var onShowHub: (() -> Void)?
 
     private let settingsStore: SettingsStore
     private let audio: AudioCapturing
     private let transcriber: Transcribing
     private let pasteService: Pasting
-    private var localStore: LocalStore?
     private let hotKeys: HotKeyService
-    private var pendingPasteTarget: PasteTarget?
+    private var localStore: LocalStore?
+
+    private var pasteTarget: PasteTarget?
+    private var sessionID = UUID()
+    private var transcriptionTask: Task<Void, Never>?
+    private var feedbackTask: Task<Void, Never>?
+    private var modelPreparationTask: Task<Void, Never>?
+    private var toggleHeldSince: Date?
+    private var maintenanceTimers: [Timer] = []
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
-        audio: AudioCapturing = AudioCaptureService(),
+        audio: AudioCapturing = AudioRecorder(),
         transcriber: Transcribing = DefaultTranscriptionService(),
         pasteService: Pasting = PasteService(),
-        localStore: LocalStore? = nil,
         hotKeys: HotKeyService = HotKeyService()
     ) {
         let loadedSettings = settingsStore.load()
@@ -62,273 +150,526 @@ final class AppStateController: ObservableObject {
         self.settings = loadedSettings
         self.audio = audio
         self.transcriber = transcriber
-        self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
         self.pasteService = pasteService
-        self.localStore = localStore
         self.hotKeys = hotKeys
-        configureHotKeys()
+        self.permissions = PermissionStatus.current()
+        self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
+    }
+
+    var hasCompletedOnboarding: Bool {
+        get { settingsStore.hasCompletedOnboarding }
+        set { settingsStore.hasCompletedOnboarding = newValue }
+    }
+
+    /// Something must be fixed before dictation can paste: a permission or a missing API key.
+    var needsSetup: Bool {
+        permissions.microphone == .denied || permissions.microphone == .restricted
+            || !permissions.accessibility
+            || (settings.transcriptionProvider == .groq && !settings.hasGroqAPIKey)
+    }
+
+    // MARK: - Lifecycle
+
+    func start(localStore: LocalStore) {
+        self.localStore = localStore
+        lastTranscript = localStore.latestTranscript()
+        try? localStore.applyRetention(settings.retentionPolicy)
+
+        audio.onLevel = { [weak self] level in
+            self?.levelMeter.push(level)
+        }
+        audio.onInterruption = { [weak self] in
+            // The input device changed (e.g. AirPods disconnected): keep what was said so far.
+            self?.stopRecording()
+        }
+        wireHotKeys()
+        do {
+            shortcutWarning = try hotKeys.configure(settings: settings)
+        } catch {
+            shortcutWarning = error.localizedDescription
+        }
+
+        let permissionTimer = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshPermissions() }
+        }
+        let retentionTimer = Timer(timeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                try? self.localStore?.applyRetention(self.settings.retentionPolicy)
+            }
+        }
+        for timer in [permissionTimer, retentionTimer] {
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        maintenanceTimers = [permissionTimer, retentionTimer]
+
+        // Load an already-downloaded model in the background so the first dictation is fast.
+        if settings.transcriptionProvider == .local, modelStatus.isReady {
+            prepareModel()
+        }
+    }
+
+    private func wireHotKeys() {
+        hotKeys.onTogglePressed = { [weak self] in self?.handleTogglePressed() }
+        hotKeys.onToggleReleased = { [weak self] in self?.handleToggleReleased() }
+        hotKeys.onHoldDown = { [weak self] in self?.handleHoldDown() }
+        hotKeys.onHoldUp = { [weak self] in self?.handleHoldUp() }
+        hotKeys.onHoldInterrupted = { [weak self] in self?.handleHoldInterrupted() }
+        hotKeys.onCancel = { [weak self] in self?.cancel() }
+        hotKeys.onPasteLast = { [weak self] in self?.pasteLastTranscript() }
+    }
+
+    // MARK: - Shortcut handling
+
+    private func handleTogglePressed() {
+        switch phase {
+        case .recording:
+            toggleHeldSince = nil
+            stopRecording()
+        case .transcribing:
+            break
+        case .idle, .finished:
+            if startRecording(mode: .handsFree) {
+                toggleHeldSince = .now
+            }
+        }
+    }
+
+    /// Holding the hands-free shortcut works as push-to-talk: releasing it after a long press stops.
+    private func handleToggleReleased() {
+        guard let heldSince = toggleHeldSince else { return }
+        toggleHeldSince = nil
+        if phase.isRecording, Date().timeIntervalSince(heldSince) >= 0.6 {
+            stopRecording()
+        }
+    }
+
+    private func handleHoldDown() {
+        switch phase {
+        case .idle, .finished:
+            startRecording(mode: .pushToTalk)
+        case .recording, .transcribing:
+            break
+        }
+    }
+
+    private func handleHoldUp() {
+        guard case .recording(.pushToTalk, let startedAt) = phase else { return }
+        if Date().timeIntervalSince(startedAt) < 0.3 {
+            // A quick tap of the hold key is not a dictation.
+            discardRecording()
+        } else {
+            stopRecording()
+        }
+    }
+
+    private func handleHoldInterrupted() {
+        guard case .recording(.pushToTalk, let startedAt) = phase else { return }
+        // The hold key was part of a key combo (Fn+←, Fn+F5…), not push-to-talk.
+        if Date().timeIntervalSince(startedAt) < 1.5 {
+            discardRecording()
+        }
+    }
+
+    // MARK: - Recording
+
+    /// Flow Bar button: start, or stop when already recording.
+    func toggleFromFlowBar() {
+        switch phase {
+        case .recording: stopRecording()
+        case .transcribing: break
+        case .idle, .finished: startRecording(mode: .handsFree)
+        }
     }
 
     @discardableResult
-    func configureHotKeys() -> Bool {
-        hotKeys.onToggle = { [weak self] in
-            Task { @MainActor in self?.toggleRecording() }
-        }
-        hotKeys.onHoldStart = { [weak self] in
-            Task { @MainActor in self?.holdStart() }
-        }
-        hotKeys.onHoldStop = { [weak self] in
-            Task { @MainActor in self?.holdStop() }
-        }
-        hotKeys.onCancel = { [weak self] in
-            Task { @MainActor in self?.cancelRecording() }
-        }
-        do {
-            try hotKeys.start(settings: settings)
-            return true
-        } catch {
-            state = .error(error.localizedDescription)
-            return false
-        }
-    }
+    func startRecording(mode: RecordingMode) -> Bool {
+        guard !phase.isBusy else { return false }
+        refreshPermissions()
 
-    func attachLocalStore(_ store: LocalStore) {
-        localStore = store
-    }
-
-    func saveSettings(_ newSettings: AppSettings) {
-        let conflicts = ShortcutParser.conflicts([
-            "Hands-free toggle": newSettings.toggleShortcut,
-            "Push-to-talk": newSettings.holdShortcut,
-            "Cancel": newSettings.cancelShortcut,
-            "Paste last": newSettings.pasteLastShortcut,
-            "Open Scratchpad": newSettings.scratchpadShortcut,
-            "Command Mode": newSettings.commandModeShortcut
-        ])
-        guard conflicts.isEmpty else {
-            state = .error(conflicts.joined(separator: "\n"))
-            return
-        }
-        settings = newSettings
-        settingsStore.save(newSettings)
-        let hotKeysConfigured = configureHotKeys()
-        refreshModelStatus()
-        guard hotKeysConfigured else { return }
-        state = .idle("Settings saved")
-    }
-
-    func refreshModelStatus(for settingsOverride: AppSettings? = nil) {
-        let targetSettings = settingsOverride ?? settings
-        modelStatus = transcriber.modelStatus(settings: targetSettings)
-        switch targetSettings.transcriptionProvider {
-        case .local:
-            modelDownloadMessage = modelStatus.isDownloaded
-                ? "Model is downloaded and ready."
-                : "Model is not downloaded yet. It will download automatically on the next dictation."
-        case .groq:
-            modelDownloadMessage = modelStatus.isDownloaded
-                ? "Groq is configured and ready."
-                : "Groq is selected. Add a Groq API key before dictating."
-        }
-    }
-
-    func downloadModel(for targetSettings: AppSettings) {
-        guard !isDownloadingModel else { return }
-        guard targetSettings.transcriptionProvider == .local else {
-            refreshModelStatus(for: targetSettings)
-            return
-        }
-        isDownloadingModel = true
-        modelDownloadMessage = "Downloading model..."
-        Task {
-            do {
-                let status = try await transcriber.downloadModel(settings: targetSettings)
-                modelStatus = status
-                modelDownloadMessage = status.isDownloaded
-                    ? "Model downloaded and ready."
-                    : "Download finished, but the local model files could not be verified."
-            } catch {
-                modelDownloadMessage = "Model download failed: \(error.localizedDescription)"
-            }
-            isDownloadingModel = false
-        }
-    }
-
-    func checkPermissions() {
-        let accessibility = PermissionService.hasAccessibilityPermission(prompt: false)
-        let microphone = PermissionService.microphoneAuthorizationStatus()
-        if !accessibility {
-            permissionsMessage = "Accessibility permission is required for paste automation and fallback shortcut monitoring."
-            state = .idle("Grant Accessibility")
-        } else if microphone == .denied || microphone == .restricted {
-            permissionsMessage = "Microphone permission is required for recording."
-            state = .idle("Grant Microphone")
-        } else {
-            permissionsMessage = ""
-            if case .idle = state {
-                state = .idle("Ready")
-            }
-        }
-    }
-
-    func promptForMissingStartupPermissions() {
-        checkPermissions()
-    }
-
-    func requestPermissions() {
-        if !PermissionService.hasAccessibilityPermission(prompt: false) {
-            _ = PermissionService.hasAccessibilityPermission(prompt: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                if !PermissionService.hasAccessibilityPermission(prompt: false) {
-                    PermissionService.openAccessibilitySettings()
-                }
-                self.checkPermissions()
-            }
-        }
-        Task {
-            _ = await PermissionService.requestMicrophoneAccess()
-            await MainActor.run { self.checkPermissions() }
-        }
-    }
-
-    func toggleRecording() {
-        if audio.isRecording {
-            stopRecording()
-        } else {
-            startRecording(mode: .toggle)
-        }
-    }
-
-    func preparePasteTargetForFlowBarInteraction() {
-        guard !audio.isRecording else { return }
-        pendingPasteTarget = pasteService.capturePasteTarget()
-    }
-
-    func holdStart() {
-        guard !audio.isRecording else { return }
-        startRecording(mode: .hold)
-    }
-
-    func holdStop() {
-        guard audio.isRecording else { return }
-        stopRecording()
-    }
-
-    func startRecording(mode: RecordingMode) {
-        guard !audio.isRecording else { return }
-        if pendingPasteTarget == nil {
-            pendingPasteTarget = pasteService.capturePasteTarget()
-        }
-        let microphone = PermissionService.microphoneAuthorizationStatus()
-        if microphone == .notDetermined {
-            state = .idle("Grant Microphone")
+        switch permissions.microphone {
+        case .authorized:
+            break
+        case .notDetermined:
             Task {
                 let granted = await PermissionService.requestMicrophoneAccess()
-                await MainActor.run {
-                    if granted {
-                        self.startRecording(mode: mode)
-                    } else {
-                        self.checkPermissions()
-                    }
+                refreshPermissions()
+                if granted {
+                    showFeedback(Feedback(kind: .info, title: "Microphone ready", detail: "Start dictating again."))
                 }
             }
-            return
-        }
-        guard microphone != .denied && microphone != .restricted else {
-            checkPermissions()
-            return
-        }
-
-        if !PermissionService.hasAccessibilityPermission(prompt: false) {
-            permissionsMessage = "Accessibility permission is required to paste into the focused app. Recording will still work and leave text on the clipboard."
-        } else {
-            permissionsMessage = ""
+            return false
+        default:
+            showFeedback(Feedback(
+                kind: .error,
+                title: "Microphone access is off",
+                detail: "Allow Flowtype in Privacy & Security → Microphone.",
+                action: .openMicrophoneSettings
+            ), duration: 6)
+            return false
         }
 
+        if settings.transcriptionProvider == .groq, !settings.hasGroqAPIKey {
+            showFeedback(Feedback(
+                kind: .error,
+                title: "Groq API key missing",
+                detail: "Add one in Settings or switch to on-device.",
+                action: .openHub(.settings)
+            ), duration: 6)
+            return false
+        }
+
+        pasteTarget = pasteService.captureTarget()
+        levelMeter.reset()
         do {
-            try audio.start()
-            state = .recording(mode: mode, startedAt: .now)
+            try audio.start(deviceUID: settings.microphoneUID.isEmpty ? nil : settings.microphoneUID)
         } catch {
-            state = .error("Mic error: \(error.localizedDescription)")
+            pasteTarget = nil
+            showFeedback(Feedback(kind: .error, title: "Couldn't start the microphone", detail: error.localizedDescription), duration: 5)
+            return false
         }
+
+        feedbackTask?.cancel()
+        sessionID = UUID()
+        phase = .recording(mode: mode, startedAt: .now)
+        if settings.playSounds {
+            SoundEffects.play(.start)
+        }
+        // Load the model while the user speaks rather than after they finish.
+        if settings.transcriptionProvider == .local, !transcriber.isLoaded(settings: settings) {
+            prepareModel()
+        }
+        return true
     }
 
     func stopRecording() {
+        guard phase.isRecording else { return }
+        toggleHeldSince = nil
+        guard let recorded = audio.stop() else {
+            phase = .idle
+            return
+        }
+        if settings.playSounds {
+            SoundEffects.play(.stop)
+        }
+
+        guard recorded.duration >= 0.3 else {
+            pasteTarget = nil
+            phase = .idle
+            return
+        }
+        guard recorded.peakLevel >= 0.001 else {
+            pasteTarget = nil
+            showFeedback(Feedback(
+                kind: .warning,
+                title: "No sound from the microphone",
+                detail: "Check the input device in Settings.",
+                action: .openHub(.settings)
+            ), duration: 5)
+            return
+        }
+
+        let target = pasteTarget
+        pasteTarget = nil
+        let session = sessionID
+        let settings = settings
+        let rules = localStore?.replacementRules() ?? TextReplacementRules()
+        phase = .transcribing
+        transcriptionTask = Task { [weak self] in
+            await self?.transcribeAndInsert(recorded, target: target, settings: settings, rules: rules, session: session)
+        }
+    }
+
+    /// Stops without transcribing.
+    private func discardRecording() {
+        guard phase.isRecording else { return }
+        audio.cancel()
+        pasteTarget = nil
+        toggleHeldSince = nil
+        phase = .idle
+    }
+
+    func cancel() {
+        switch phase {
+        case .recording:
+            audio.cancel()
+            pasteTarget = nil
+        case .transcribing:
+            transcriptionTask?.cancel()
+        case .idle, .finished:
+            return
+        }
+        toggleHeldSince = nil
+        sessionID = UUID()
+        if settings.playSounds {
+            SoundEffects.play(.cancel)
+        }
+        showFeedback(Feedback(kind: .info, title: "Cancelled"), duration: 1.2)
+    }
+
+    private func transcribeAndInsert(
+        _ recorded: RecordedAudio,
+        target: PasteTarget?,
+        settings: AppSettings,
+        rules: TextReplacementRules,
+        session: UUID
+    ) async {
         do {
-            guard let captured = try audio.stop() else {
-                state = .idle("No speech detected")
-                pendingPasteTarget = nil
+            let raw = try await transcriber.transcribe(recorded, settings: settings, vocabulary: rules.promptTerms)
+            guard session == sessionID, !Task.isCancelled else { return }
+
+            let result = TranscriptPostProcessor.process(raw, rules: rules)
+            guard !result.text.isEmpty else {
+                showFeedback(Feedback(kind: .info, title: "Didn't catch that", detail: "No speech was detected."), duration: 2.5)
                 return
             }
-            state = .processing
-            Task {
-                await transcribeAndPaste(captured)
+
+            lastTranscript = result.text
+            let outcome = await pasteService.insert(result.text, into: target, restoreClipboard: settings.restoreClipboardAfterPaste)
+            saveHistory(result.text, outcome: outcome, duration: recorded.duration, settings: settings)
+            localStore?.recordDictionaryUsage(phrases: result.matchedPhrases)
+            guard session == sessionID else { return }
+
+            switch outcome {
+            case .pasted:
+                let words = TextMetrics.wordCount(result.text)
+                showFeedback(Feedback(kind: .success, title: "Pasted", detail: "\(words) word\(words == 1 ? "" : "s")"), duration: 1.6)
+            case .copied(.needsAccessibility):
+                showFeedback(Feedback(
+                    kind: .warning,
+                    title: "Copied — press ⌘V",
+                    detail: "Allow Accessibility to paste automatically.",
+                    action: .openHub(.home)
+                ), duration: 5)
+            case .copied:
+                showFeedback(Feedback(kind: .info, title: "Copied — press ⌘V", detail: "No text field was focused."), duration: 3.5)
             }
+        } catch is CancellationError {
+            return
         } catch {
-            state = .error("Recording failed: \(error.localizedDescription)")
+            guard session == sessionID, !Task.isCancelled else { return }
+            if settings.playSounds {
+                SoundEffects.play(.error)
+            }
+            showFeedback(Feedback(kind: .error, title: "Transcription failed", detail: error.localizedDescription, action: .openHub(.settings)), duration: 6)
         }
     }
 
-    func cancelRecording() {
-        guard audio.isRecording else { return }
-        audio.cancel()
-        pendingPasteTarget = nil
-        state = .cancelled
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            self.state = .idle("Ready")
-        }
-    }
-
-    private func transcribeAndPaste(_ captured: CapturedAudio) async {
-        defer {
-            removeCapturedAudioFile(captured.url)
-        }
-
+    private func saveHistory(_ text: String, outcome: PasteOutcome, duration: TimeInterval, settings: AppSettings) {
         do {
-            let transcript = try await transcriber.transcribe(audioURL: captured.url, settings: settings)
-            state = .pasting
-            let target = pendingPasteTarget
-            pendingPasteTarget = nil
-            let outcome = pasteService.paste(
-                transcript,
-                restoreClipboard: settings.restoreClipboardAfterPaste,
-                target: target
-            )
-            let historyMessage = saveTranscript(transcript, outcome: outcome)
-            state = .idle(historyMessage ?? outcome.message)
-        } catch {
-            pendingPasteTarget = nil
-            state = .error("Transcription failed: \(error.localizedDescription)")
-        }
-    }
-
-    private func saveTranscript(_ transcript: String, outcome: PasteOutcome) -> String? {
-        guard let localStore else {
-            NSLog("Flowtype transcript history skipped: local store is not attached.")
-            return nil
-        }
-
-        do {
-            try localStore.saveTranscript(
-                transcript,
+            try localStore?.saveTranscript(
+                text,
                 pasted: outcome.pasted,
                 statusMessage: outcome.message,
+                durationSeconds: duration,
                 retentionPolicy: settings.retentionPolicy
             )
-            return nil
         } catch {
-            NSLog("Flowtype transcript history save failed: \(error.localizedDescription)")
-            return "\(outcome.message) History could not be saved."
+            NSLog("Flowtype could not save history: \(error.localizedDescription)")
         }
     }
 
-    private func removeCapturedAudioFile(_ url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
+    func pasteLastTranscript() {
+        guard !phase.isBusy else { return }
+        guard let text = lastTranscript ?? localStore?.latestTranscript() else {
+            showFeedback(Feedback(kind: .info, title: "Nothing to paste yet"), duration: 2)
+            return
+        }
+        paste(text)
+    }
 
+    /// Pastes arbitrary text (e.g. from History) into the app that was last in front.
+    func paste(_ text: String) {
+        Task {
+            // Let the shortcut's modifier keys come up first.
+            try? await Task.sleep(for: .milliseconds(120))
+            let outcome = await pasteService.insert(text, into: nil, restoreClipboard: settings.restoreClipboardAfterPaste)
+            showFeedback(Feedback(kind: outcome.pasted ? .success : .info, title: outcome.pasted ? "Pasted" : "Copied — press ⌘V"), duration: 1.6)
+        }
+    }
+
+    func copyToClipboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    // MARK: - Feedback
+
+    func showFeedback(_ feedback: Feedback, duration: TimeInterval = 2.5) {
+        feedbackTask?.cancel()
+        phase = .finished(feedback)
+        feedbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled, let self, case .finished(let current) = self.phase, current.id == feedback.id else { return }
+            self.phase = .idle
+        }
+    }
+
+    func perform(_ action: Feedback.Action) {
+        switch action {
+        case .openHub(let page):
+            showHub(page)
+        case .openAccessibilitySettings:
+            PermissionService.openAccessibilitySettings()
+        case .openMicrophoneSettings:
+            PermissionService.openMicrophoneSettings()
+        }
+        if case .finished = phase {
+            phase = .idle
+        }
+    }
+
+    func showHub(_ page: HubPage? = nil) {
+        if let page {
+            hubPage = page
+        }
+        onShowHub?()
+    }
+
+    // MARK: - Permissions
+
+    func refreshPermissions() {
+        let current = PermissionStatus.current()
+        guard current != permissions else { return }
+        let gainedAccessibility = current.accessibility && !permissions.accessibility
+        permissions = current
+        if gainedAccessibility {
+            hotKeys.restartMonitors()
+        }
+    }
+
+    func requestMicrophoneAccess() {
+        switch permissions.microphone {
+        case .notDetermined:
+            Task {
+                _ = await PermissionService.requestMicrophoneAccess()
+                refreshPermissions()
+            }
+        default:
+            PermissionService.openMicrophoneSettings()
+        }
+    }
+
+    func requestAccessibilityAccess() {
+        if !PermissionService.hasAccessibilityPermission(prompt: true) {
+            PermissionService.openAccessibilitySettings()
+        }
+        refreshPermissions()
+    }
+
+    /// For when System Settings shows Flowtype as allowed but macOS still reports it untrusted
+    /// (common after the app is updated or rebuilt).
+    func resetAccessibilityAccess() {
+        PermissionService.resetAccessibilityPermission()
+        requestAccessibilityAccess()
+    }
+
+    // MARK: - Settings
+
+    /// Applies a settings change immediately. Returns an error message if it was rejected.
+    @discardableResult
+    func updateSettings(_ change: (inout AppSettings) -> Void) -> String? {
+        var next = settings
+        change(&next)
+        guard next != settings else { return nil }
+
+        let conflicts = ShortcutParser.conflicts(next.shortcutBindings)
+        guard conflicts.isEmpty else { return conflicts.joined(separator: "\n") }
+
+        let shortcutsChanged = next.toggleShortcut != settings.toggleShortcut
+            || next.pasteLastShortcut != settings.pasteLastShortcut
+            || next.holdKey != settings.holdKey
+        if shortcutsChanged {
+            do {
+                shortcutWarning = try hotKeys.configure(settings: next)
+            } catch {
+                shortcutWarning = try? hotKeys.configure(settings: settings)
+                return error.localizedDescription
+            }
+        }
+
+        let modelChanged = next.transcriptionProvider != settings.transcriptionProvider
+            || next.transcriptionModel != settings.transcriptionModel
+            || next.groqAPIKey != settings.groqAPIKey
+        let retentionChanged = next.retentionPolicy != settings.retentionPolicy
+
+        settings = next
+        settingsStore.save(next)
+
+        if modelChanged {
+            modelError = nil
+            refreshModelStatus()
+            if next.transcriptionProvider == .local, modelStatus.isReady {
+                prepareModel()
+            }
+        }
+        if retentionChanged {
+            try? localStore?.applyRetention(next.retentionPolicy)
+        }
+        return nil
+    }
+
+    func suspendShortcuts() {
+        hotKeys.suspend()
+    }
+
+    func resumeShortcuts() {
+        hotKeys.resume()
+    }
+
+    // MARK: - Model
+
+    func refreshModelStatus() {
+        modelStatus = transcriber.modelStatus(settings: settings)
+    }
+
+    /// Downloads (if needed) and loads the selected on-device model.
+    func prepareModel() {
+        guard settings.transcriptionProvider == .local, modelPreparationTask == nil else { return }
+        let target = settings
+        modelError = nil
+        modelActivity = modelStatus.isReady ? .loading : .downloading(0)
+        modelPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await transcriber.prepare(settings: target) { [weak self] fraction in
+                    Task { @MainActor in
+                        guard let self, self.modelPreparationTask != nil else { return }
+                        self.modelActivity = fraction.map { .downloading($0) } ?? .loading
+                    }
+                }
+            } catch {
+                modelError = "Model download failed: \(error.localizedDescription)"
+            }
+            modelPreparationTask = nil
+            modelActivity = nil
+            refreshModelStatus()
+            // The selection may have changed while this one was loading.
+            if settings.transcriptionProvider == .local,
+               settings.transcriptionModel != target.transcriptionModel,
+               modelStatus.isReady {
+                prepareModel()
+            }
+        }
+    }
+
+    func deleteDownloadedModels() {
         do {
-            try FileManager.default.removeItem(at: url)
+            try transcriber.deleteDownloadedModels()
         } catch {
-            NSLog("Flowtype captured audio cleanup failed for \(url.path): \(error.localizedDescription)")
+            modelError = error.localizedDescription
+        }
+        refreshModelStatus()
+    }
+
+    // MARK: - Data
+
+    func deleteAllHistory() {
+        do {
+            try localStore?.deleteAllHistory()
+            lastTranscript = nil
+        } catch {
+            NSLog("Flowtype could not delete history: \(error.localizedDescription)")
         }
     }
 }
