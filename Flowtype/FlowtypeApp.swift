@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         guard !Self.isRunningTests else { return }
+        terminateOtherInstances()
 
         updaterController = SPUStandardUpdaterController(
             startingUpdater: true,
@@ -65,6 +66,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if !controller.hasCompletedOnboarding || !controller.permissions.accessibility {
             controller.showHub(.home)
             controller.hasCompletedOnboarding = true
+        }
+    }
+
+    /// Two copies (e.g. an old download and a new install) would both react to the push-to-talk
+    /// key and paste every dictation twice. The most recently launched copy takes over.
+    private func terminateOtherInstances() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let current = ProcessInfo.processInfo.processIdentifier
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != current }
+        for app in others {
+            Log.app.info("Asking another running copy (pid \(app.processIdentifier)) to quit")
+            if !app.terminate() {
+                app.forceTerminate()
+            }
         }
     }
 
