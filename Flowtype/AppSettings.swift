@@ -139,6 +139,7 @@ struct AppSettings: Equatable, Sendable {
     var groqAPIKey: String
     var microphoneUID: String
     var flowBarPosition: FlowBarPosition
+    var showInDock: Bool
     var showFlowBarWhenIdle: Bool
     var playSounds: Bool
     var restoreClipboardAfterPaste: Bool
@@ -153,6 +154,7 @@ struct AppSettings: Equatable, Sendable {
         groqAPIKey: "",
         microphoneUID: "",
         flowBarPosition: .bottomCenter,
+        showInDock: true,
         showFlowBarWhenIdle: true,
         playSounds: true,
         restoreClipboardAfterPaste: true,
@@ -183,10 +185,10 @@ final class SettingsStore {
         static let microphoneUID = "audio.microphoneUID"
         static let flowBarPosition = "flowBar.position"
         static let showFlowBarWhenIdle = "flowBar.showWhenIdle"
+        static let showInDock = "app.showInDock"
         static let playSounds = "feedback.playSounds"
         static let restoreClipboardAfterPaste = "clipboard.restoreAfterPaste"
         static let retentionPolicy = "retention.policy"
-        static let hasCompletedOnboarding = "onboarding.completed"
     }
 
     private let defaults: UserDefaults
@@ -195,11 +197,6 @@ final class SettingsStore {
     init(defaults: UserDefaults = .standard, apiKeyStore: GroqAPIKeyStoring = KeychainGroqAPIKeyStore()) {
         self.defaults = defaults
         self.apiKeyStore = apiKeyStore
-    }
-
-    var hasCompletedOnboarding: Bool {
-        get { defaults.bool(forKey: Key.hasCompletedOnboarding) }
-        set { defaults.set(newValue, forKey: Key.hasCompletedOnboarding) }
     }
 
     func load() -> AppSettings {
@@ -216,6 +213,7 @@ final class SettingsStore {
             groqAPIKey: apiKeyStore.loadAPIKey(),
             microphoneUID: defaults.string(forKey: Key.microphoneUID) ?? fallback.microphoneUID,
             flowBarPosition: FlowBarPosition(rawValue: defaults.string(forKey: Key.flowBarPosition) ?? "") ?? fallback.flowBarPosition,
+            showInDock: defaults.object(forKey: Key.showInDock) as? Bool ?? fallback.showInDock,
             showFlowBarWhenIdle: defaults.object(forKey: Key.showFlowBarWhenIdle) as? Bool ?? fallback.showFlowBarWhenIdle,
             playSounds: defaults.object(forKey: Key.playSounds) as? Bool ?? fallback.playSounds,
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
@@ -231,6 +229,7 @@ final class SettingsStore {
         defaults.set(Self.normalizeTranscriptionModel(settings.transcriptionModel), forKey: Key.transcriptionModel)
         defaults.set(settings.microphoneUID, forKey: Key.microphoneUID)
         defaults.set(settings.flowBarPosition.rawValue, forKey: Key.flowBarPosition)
+        defaults.set(settings.showInDock, forKey: Key.showInDock)
         defaults.set(settings.showFlowBarWhenIdle, forKey: Key.showFlowBarWhenIdle)
         defaults.set(settings.playSounds, forKey: Key.playSounds)
         defaults.set(settings.restoreClipboardAfterPaste, forKey: Key.restoreClipboardAfterPaste)

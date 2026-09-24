@@ -42,8 +42,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-        guard !Self.isRunningTests else { return }
+        guard !Self.isRunningTests else {
+            NSApp.setActivationPolicy(.accessory)
+            return
+        }
         terminateOtherInstances()
 
         updaterController = SPUStandardUpdaterController(
@@ -63,10 +65,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         flowBar.show()
         installStatusItem()
 
-        // Flowtype has no Dock icon and its menu bar icon can be hidden behind the notch, so a
-        // launch from Finder or the Dock always opens the Hub. (Skip this once launch-at-login exists.)
+        applyDockVisibility(controller.settings.showInDock)
+        controller.$settings
+            .map(\.showInDock)
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] show in self?.applyDockVisibility(show) }
+            .store(in: &cancellables)
+
+        // Launching Flowtype should show it, even when the Dock icon is off and the menu bar icon
+        // is hidden behind the notch. (Skip this once launch-at-login exists.)
         controller.showHub(.home)
-        controller.hasCompletedOnboarding = true
+    }
+
+    /// With a Dock icon Flowtype also appears in ⌘Tab and can be quit like any app. Without one it
+    /// lives only in the menu bar and the dictation bar.
+    private func applyDockVisibility(_ show: Bool) {
+        let hubWasVisible = hubWindow?.isVisible == true
+        NSApp.setActivationPolicy(show ? .regular : .accessory)
+        if hubWasVisible {
+            // Changing the policy deactivates the app; keep the Hub in front.
+            NSApp.activate()
+            hubWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 
     /// Two copies (e.g. an old download and a new install) would both react to the push-to-talk

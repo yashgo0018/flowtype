@@ -30,6 +30,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.transcriptionModel, "openai_whisper-small.en")
         XCTAssertEqual(settings.groqAPIKey, "")
         XCTAssertTrue(settings.restoreClipboardAfterPaste)
+        XCTAssertTrue(settings.showInDock)
     }
 
     func testSaveAndReloadSettings() {
@@ -45,6 +46,7 @@ final class SettingsStoreTests: XCTestCase {
         settings.groqAPIKey = "  test-key  "
         settings.playSounds = false
         settings.showFlowBarWhenIdle = false
+        settings.showInDock = false
 
         store.save(settings)
         let reloaded = makeStore().load()
@@ -59,6 +61,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.groqAPIKey, "test-key")
         XCTAssertFalse(reloaded.playSounds)
         XCTAssertFalse(reloaded.showFlowBarWhenIdle)
+        XCTAssertFalse(reloaded.showInDock)
     }
 
     func testLegacyAndInvalidValuesFallBack() {

@@ -81,14 +81,18 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Dictation bar") {
-                Picker("Position", selection: binding(\.flowBarPosition)) {
+            Section("Appearance") {
+                Toggle(isOn: binding(\.showInDock)) {
+                    Text("Show in Dock")
+                    Text("When off, Flowtype lives only in the menu bar and the dictation bar.")
+                }
+                Picker("Dictation bar position", selection: binding(\.flowBarPosition)) {
                     ForEach(FlowBarPosition.allCases) { position in
                         Text(position.title).tag(position)
                     }
                 }
                 Toggle(isOn: binding(\.showFlowBarWhenIdle)) {
-                    Text("Show when not dictating")
+                    Text("Show dictation bar when not dictating")
                     Text("When off, the bar only appears while you dictate.")
                 }
                 Toggle("Play sounds", isOn: binding(\.playSounds))

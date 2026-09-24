@@ -163,11 +163,6 @@ final class AppStateController: ObservableObject {
         self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
     }
 
-    var hasCompletedOnboarding: Bool {
-        get { settingsStore.hasCompletedOnboarding }
-        set { settingsStore.hasCompletedOnboarding = newValue }
-    }
-
     /// Something must be fixed before dictation can paste: a permission or a missing API key.
     var needsSetup: Bool {
         permissions.microphone == .denied || permissions.microphone == .restricted
