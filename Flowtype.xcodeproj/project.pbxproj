@@ -26,6 +26,7 @@
 		100000000000000000000118 /* LibraryViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000227 /* LibraryViews.swift */; };
 		100000000000000000000119 /* SettingsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000228 /* SettingsViews.swift */; };
 		100000000000000000000120 /* TextProcessingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000303 /* TextProcessingTests.swift */; };
+		100000000000000000000130 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000230 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +61,8 @@
 		100000000000000000000227 /* LibraryViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViews.swift; sourceTree = "<group>"; };
 		100000000000000000000228 /* SettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsViews.swift; sourceTree = "<group>"; };
 		100000000000000000000303 /* TextProcessingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextProcessingTests.swift; sourceTree = "<group>"; };
+		100000000000000000000230 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		100000000000000000000231 /* Flowtype.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Flowtype.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,7 +111,9 @@
 				100000000000000000000226 /* SystemSupport.swift */,
 				100000000000000000000227 /* LibraryViews.swift */,
 				100000000000000000000228 /* SettingsViews.swift */,
+				100000000000000000000230 /* Assets.xcassets */,
 				100000000000000000000209 /* Info.plist */,
+				100000000000000000000231 /* Flowtype.entitlements */,
 			);
 			path = Flowtype;
 			sourceTree = "<group>";
@@ -219,6 +224,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				100000000000000000000130 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -393,20 +399,22 @@
 		100000000000000000000912 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = HZHNBYQCWN;
 				GENERATE_INFOPLIST_FILE = NO;
+				CODE_SIGN_ENTITLEMENTS = Flowtype/Flowtype.entitlements;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Flowtype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype;
 				PRODUCT_MODULE_NAME = Flowtype;
 				PRODUCT_NAME = Flowtype;
@@ -418,20 +426,22 @@
 		100000000000000000000913 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = HZHNBYQCWN;
 				GENERATE_INFOPLIST_FILE = NO;
+				CODE_SIGN_ENTITLEMENTS = Flowtype/Flowtype.entitlements;
+				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = Flowtype/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = studio.infinitumlabs.flowtype;
 				PRODUCT_MODULE_NAME = Flowtype;
 				PRODUCT_NAME = Flowtype;
@@ -445,6 +455,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = HZHNBYQCWN;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -465,6 +476,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = HZHNBYQCWN;
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
