@@ -30,7 +30,7 @@ xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || fail "No notarization credentials named '$NOTARY_PROFILE'. See the setup comment at the top of this script."
 
 VERSION=$(xcodebuild -project Flowtype.xcodeproj -scheme Flowtype -configuration Release -showBuildSettings 2>/dev/null \
-  | awk -F' = ' '/ MARKETING_VERSION = / { print $2; exit }')
+  | awk -F' = ' '/ MARKETING_VERSION = / && !found { print $2; found = 1 }')
 # Sparkle compares CFBundleVersion, so it must increase with every release.
 BUILD=$(git rev-list --count HEAD)
 TAG="v$VERSION"
@@ -76,7 +76,9 @@ cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 hdiutil create -volname "Flowtype" -srcfolder "$STAGING" -fs HFS+ -format UDZO -ov "$DMG" -quiet
 rm -rf "$STAGING"
-IDENTITY=$(codesign -dvv "$APP" 2>&1 | awk -F'=' '/^Authority=Developer ID Application/ { print $2; exit }')
+# awk reads all input (no early exit): closing the pipe early would SIGPIPE codesign and fail under pipefail.
+IDENTITY=$(codesign -dvv "$APP" 2>&1 | awk -F'=' '/^Authority=Developer ID Application/ && !found { print $2; found = 1 }')
+[[ -n "$IDENTITY" ]] || fail "The exported app isn't signed with a Developer ID Application certificate."
 codesign --sign "$IDENTITY" --timestamp "$DMG"
 
 step "Notarizing the DMG"
