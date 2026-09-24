@@ -18,6 +18,7 @@ final class FlowBarPanelController {
     private var cancellables: Set<AnyCancellable> = []
     private var currentScreen: NSScreen?
     private var wasRecording = false
+    private var collapseTask: Task<Void, Never>?
 
     init(controller: AppStateController) {
         self.controller = controller
@@ -32,8 +33,8 @@ final class FlowBarPanelController {
             backing: .buffered,
             defer: false
         )
-        hostingView.onHoverChange = { [weak model] hovering in
-            model?.isHovering = hovering
+        hostingView.onHoverChange = { [weak self] hovering in
+            self?.hoverChanged(hovering)
         }
         panel.contentView = hostingView
         panel.isOpaque = false
@@ -59,6 +60,23 @@ final class FlowBarPanelController {
                 self.update(phase: controller.phase, settings: controller.settings, activity: controller.modelActivity, hovering: self.model.isHovering)
             }
             .store(in: &cancellables)
+    }
+
+    private func hoverChanged(_ hovering: Bool) {
+        collapseTask?.cancel()
+        if hovering {
+            if !model.isHovering { model.isHovering = true }
+            return
+        }
+        // Collapse only once the pointer has really left, not on a stray exit during a resize.
+        collapseTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, !Task.isCancelled else { return }
+            if self.panel.frame.contains(NSEvent.mouseLocation) {
+                return
+            }
+            self.model.isHovering = false
+        }
     }
 
     func show() {
@@ -132,7 +150,8 @@ enum FlowBarLayout {
     }
 
     static func idleHintWidth(settings: AppSettings) -> CGFloat {
-        min(360, textWidth(FlowBarView.idleHint(settings: settings), weight: .medium, size: 12) + 70)
+        // Text plus the mic and open buttons on either side.
+        min(400, textWidth(FlowBarView.idleHint(settings: settings), weight: .medium, size: 12) + 104)
     }
 
     private static func textWidth(_ text: String, weight: NSFont.Weight, size: CGFloat) -> CGFloat {
@@ -152,11 +171,11 @@ final class FlowBarHostingView<Content: View>: NSHostingView<Content> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let trackingArea {
-            removeTrackingArea(trackingArea)
-        }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Added once: .inVisibleRect follows the view as the panel resizes. Recreating the area on
+        // every resize posts a spurious mouseExited, which made the pill expand and collapse in a loop.
+        guard trackingArea == nil else { return }
         let area = NSTrackingArea(
             rect: .zero,
             options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
@@ -203,6 +222,13 @@ struct FlowBarView: View {
             content
                 .padding(.horizontal, isCollapsed ? 0 : 6)
                 .transition(.opacity)
+        }
+        .contextMenu {
+            Button("Open Flowtype") { controller.showHub(.home) }
+            Button("History") { controller.showHub(.history) }
+            Button("Settings…") { controller.showHub(.settings) }
+            Divider()
+            Button("Quit Flowtype") { NSApp.terminate(nil) }
         }
         .padding(FlowBarPanelController.margin)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -281,8 +307,11 @@ private struct IdleHintView: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
+            FlowBarIconButton(systemImage: "slider.horizontal.3", tint: .white.opacity(0.85), background: .white.opacity(0.12), help: "Open Flowtype") {
+                controller.showHub()
+            }
         }
-        .padding(.leading, 2)
+        .padding(.horizontal, 2)
     }
 }
 

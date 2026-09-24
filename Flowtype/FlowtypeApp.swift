@@ -63,10 +63,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         flowBar.show()
         installStatusItem()
 
-        if !controller.hasCompletedOnboarding || !controller.permissions.accessibility {
-            controller.showHub(.home)
-            controller.hasCompletedOnboarding = true
-        }
+        // Flowtype has no Dock icon and its menu bar icon can be hidden behind the notch, so a
+        // launch from Finder or the Dock always opens the Hub. (Skip this once launch-at-login exists.)
+        controller.showHub(.home)
+        controller.hasCompletedOnboarding = true
     }
 
     /// Two copies (e.g. an old download and a new install) would both react to the push-to-talk
