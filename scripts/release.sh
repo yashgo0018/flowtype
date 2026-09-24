@@ -59,8 +59,34 @@ xcodebuild -exportArchive \
 APP="$OUT/export/Flowtype.app"
 codesign --verify --deep --strict "$APP"
 
+notary() {
+  xcrun notarytool "$@" --keychain-profile "$NOTARY_PROFILE" --output-format json
+}
+
+# Submits a file and waits for Apple's verdict. The wait can take an hour for a new team, so a
+# dropped connection while polling is retried instead of aborting the release.
 notarize() {
-  xcrun notarytool submit "$1" --keychain-profile "$NOTARY_PROFILE" --wait
+  local file="$1" id="" status="In Progress" deadline=$((SECONDS + 4 * 3600))
+  for attempt in 1 2 3; do
+    id=$(notary submit "$file" 2>/dev/null | plutil -extract id raw -o - - 2>/dev/null) && [[ -n "$id" ]] && break
+    echo "Upload attempt $attempt failed; retrying in 30s..."
+    sleep 30
+  done
+  [[ -n "$id" ]] || fail "Could not upload $file for notarization."
+  echo "Submitted $(basename "$file") (submission $id). Waiting for Apple..."
+
+  while [[ "$status" == "In Progress" ]]; do
+    (( SECONDS < deadline )) || fail "Still in progress after 4 hours. Check later: xcrun notarytool info $id --keychain-profile $NOTARY_PROFILE"
+    sleep 30
+    # A failed check (e.g. offline) leaves the status unchanged, so we keep polling.
+    status=$(notary info "$id" 2>/dev/null | plutil -extract status raw -o - - 2>/dev/null || echo "In Progress")
+  done
+
+  if [[ "$status" != "Accepted" ]]; then
+    xcrun notarytool log "$id" --keychain-profile "$NOTARY_PROFILE" || true
+    fail "Notarization of $(basename "$file") finished with status: $status"
+  fi
+  echo "Accepted."
 }
 
 step "Notarizing the app"
