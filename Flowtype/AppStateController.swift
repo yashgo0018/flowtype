@@ -524,6 +524,13 @@ final class AppStateController: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    #if DEBUG
+    /// Puts the dictation bar into a given state for rendering website screenshots.
+    func setPhaseForScreenshots(_ phase: DictationPhase) {
+        self.phase = phase
+    }
+    #endif
+
     // MARK: - Feedback
 
     func showFeedback(_ feedback: Feedback, duration: TimeInterval = 2.5) {

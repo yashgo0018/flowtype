@@ -140,7 +140,8 @@ struct HomeView: View {
                     Spacer()
                     if !history.isEmpty {
                         Button("View all") { controller.hubPage = .history }
-                            .buttonStyle(.link)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(Color.accentColor)
                     }
                 }
                 if history.isEmpty {
@@ -513,19 +514,30 @@ struct KeyCapsView: View {
 
 /// Scrolling page body with the Hub's standard padding and readable width.
 struct PageScrollView<Content: View>: View {
+    @Environment(\.pageScrollingDisabled) private var scrollingDisabled
     var spacing: CGFloat = 20
     @ViewBuilder let content: Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: spacing) {
-                content
-            }
-            .padding(28)
-            .frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity)
+        let page = VStack(alignment: .leading, spacing: spacing) {
+            content
+        }
+        .padding(28)
+        .frame(maxWidth: 900, alignment: .leading)
+        .frame(maxWidth: .infinity)
+
+        if scrollingDisabled {
+            page.frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            ScrollView { page }
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Lays pages out without a scroll view. Used to render website screenshots, since
+    /// ImageRenderer can't draw scroll views.
+    @Entry var pageScrollingDisabled = false
 }
 
 struct PageHeader<Accessory: View>: View {

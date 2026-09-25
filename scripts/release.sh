@@ -2,8 +2,8 @@
 # Builds a signed, notarized Flowtype DMG and the Sparkle appcast.
 #
 # One-time setup (stores notarization credentials in your keychain):
-#   xcrun notarytool store-credentials flowtype-notary \
-#     --apple-id <you@example.com> --team-id HZHNBYQCWN --password <app-specific-password>
+#   xcrun notarytool store-credentials flowtype-notary --apple-id <you@example.com> --team-id HZHNBYQCWN
+# (It prompts for an app-specific password. See RELEASING.md.)
 #
 # Usage:
 #   scripts/release.sh            # build, notarize, create DMG + appcast in build/release
@@ -57,7 +57,9 @@ publish() {
   step "Publishing Flowtype $VERSION ($BUILD) to GitHub"
   git tag "$TAG"
   git push origin HEAD "$TAG"
-  gh release create "$TAG" "$DMG" "$OUT/appcast.xml" --repo "$REPO" --title "Flowtype $VERSION" --generate-notes
+  # Also attach the DMG as Flowtype.dmg so releases/latest/download/Flowtype.dmg always works.
+  cp "$DMG" "$OUT/Flowtype.dmg"
+  gh release create "$TAG" "$DMG" "$OUT/Flowtype.dmg" "$OUT/appcast.xml" --repo "$REPO" --title "Flowtype $VERSION" --generate-notes
 }
 
 case "$MODE" in
