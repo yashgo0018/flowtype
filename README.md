@@ -6,13 +6,14 @@
 
 <p align="center">
   <strong>Hold Fn, speak, and your words are typed into any app on your Mac.</strong><br>
-  Private, on-device dictation for macOS.
+  Private, on-device dictation for macOS. Free and open source.
 </p>
 
 <p align="center">
   <a href="https://github.com/yashgo0018/flowtype/releases/latest/download/Flowtype.dmg"><strong>Download for Mac</strong></a> ·
   <a href="https://yashgo0018.github.io/flowtype/">Website</a> ·
-  <a href="PRIVACY.md">Privacy</a>
+  <a href="PRIVACY.md">Privacy</a> ·
+  <a href="LICENSE">MIT License</a>
 </p>
 
 <p align="center">
@@ -105,8 +106,14 @@ Builds are signed with the Infinitum Consulting team. To build under your own ac
 
 Releases are documented in [RELEASING.md](RELEASING.md).
 
+## Contributing
+
+Issues and pull requests are welcome. For anything larger than a small fix, please open an issue first to talk it through.
+
 ## Acknowledgements
 
 Flowtype is built on [WhisperKit](https://github.com/argmaxinc/WhisperKit) and OpenAI's [Whisper](https://github.com/openai/whisper) models, and uses [Sparkle](https://sparkle-project.org) for updates. The full list is in the app under **Settings → About**.
 
-© 2026 Infinitum Consulting LLC
+## License
+
+Flowtype is released under the [MIT License](LICENSE). © 2026 Infinitum Consulting LLC
