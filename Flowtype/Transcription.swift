@@ -19,6 +19,8 @@ protocol Transcribing: AnyObject {
     func isLoaded(settings: AppSettings) -> Bool
     /// Releases the in-memory model; the next dictation loads it again.
     func unloadModel()
+    /// Frees the Whisper model's memory, whichever engine is selected.
+    func unloadWhisperModel()
     func deleteDownloadedModels() throws
 }
 
@@ -66,6 +68,10 @@ final class DefaultTranscriptionService: Transcribing {
         localService.unloadModel()
     }
 
+    func unloadWhisperModel() {
+        localService.unloadModel()
+    }
+
     func deleteDownloadedModels() throws {
         try localService.deleteDownloadedModels()
     }
@@ -76,6 +82,8 @@ final class WhisperKitTranscriptionService: Transcribing {
     private var whisperKit: WhisperKit?
     private var loadedModelName: String?
     private var loadingTask: (model: String, task: Task<WhisperKit, Error>)?
+    /// The most recently requested variant; an older, slower load finishing later doesn't replace it.
+    private var latestRequestedModel: String?
 
     func transcribe(_ audio: RecordedAudio, settings: AppSettings, vocabulary: [String]) async throws -> String {
         let kit = try await loadKit(modelName: SettingsStore.normalizeTranscriptionModel(settings.transcriptionModel), progress: nil)
@@ -113,10 +121,16 @@ final class WhisperKitTranscriptionService: Transcribing {
         whisperKit != nil && loadedModelName == SettingsStore.normalizeTranscriptionModel(settings.transcriptionModel)
     }
 
+    /// Releases the loaded model's memory (up to ~1.5 GB). A load still in progress is discarded when
+    /// it finishes instead of being kept.
     func unloadModel() {
-        guard loadingTask == nil else { return }
         whisperKit = nil
         loadedModelName = nil
+        latestRequestedModel = nil
+    }
+
+    func unloadWhisperModel() {
+        unloadModel()
     }
 
     func deleteDownloadedModels() throws {
@@ -129,6 +143,7 @@ final class WhisperKitTranscriptionService: Transcribing {
     }
 
     private func loadKit(modelName: String, progress: ModelPreparationProgress?) async throws -> WhisperKit {
+        latestRequestedModel = modelName
         if let whisperKit, loadedModelName == modelName {
             return whisperKit
         }
@@ -149,8 +164,11 @@ final class WhisperKitTranscriptionService: Transcribing {
         }
 
         let kit = try await task.value
-        whisperKit = kit
-        loadedModelName = modelName
+        // Keep it only if it's still the model the user wants (they may have switched away meanwhile).
+        if latestRequestedModel == modelName {
+            whisperKit = kit
+            loadedModelName = modelName
+        }
         return kit
     }
 
@@ -264,6 +282,8 @@ final class GroqTranscriptionService: Transcribing {
     }
 
     func unloadModel() {}
+
+    func unloadWhisperModel() {}
 
     func deleteDownloadedModels() throws {}
 

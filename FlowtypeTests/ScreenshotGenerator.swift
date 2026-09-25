@@ -150,5 +150,6 @@ private final class ReadyTranscriber: Transcribing {
     func prepare(settings: AppSettings, progress: ModelPreparationProgress?) async throws {}
     func isLoaded(settings: AppSettings) -> Bool { true }
     func unloadModel() {}
+    func unloadWhisperModel() {}
     func deleteDownloadedModels() throws {}
 }

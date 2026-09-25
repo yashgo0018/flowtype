@@ -137,7 +137,11 @@ final class AppStateController: ObservableObject {
     private var sessionID = UUID()
     private var transcriptionTask: Task<Void, Never>?
     private var feedbackTask: Task<Void, Never>?
-    private var modelPreparationTask: Task<Void, Never>?
+    /// Model preparation is tracked per engine and Whisper variant, so switching models never shows
+    /// (or waits behind) another model's loading or error. See `modelKey(for:)`.
+    private var preparations: [String: Task<Void, Never>] = [:]
+    private var activities: [String: ModelActivity] = [:]
+    private var errors: [String: String] = [:]
     private var toggleHeldSince: Date?
     private var maintenanceTimers: [Timer] = []
     private var lastDictationAt = Date()
@@ -234,7 +238,7 @@ final class AppStateController: ObservableObject {
     func performHousekeeping(now: Date = .now) {
         try? localStore?.applyRetention(settings.retentionPolicy)
         if !phase.isBusy,
-           modelPreparationTask == nil,
+           preparations.isEmpty,
            now.timeIntervalSince(lastDictationAt) > Self.modelIdleUnloadInterval,
            transcriber.isLoaded(settings: settings) {
             transcriber.unloadModel()
@@ -653,13 +657,20 @@ final class AppStateController: ObservableObject {
             || next.groqAPIKey != settings.groqAPIKey
         let retentionChanged = next.retentionPolicy != settings.retentionPolicy
 
+        let previous = settings
         settings = next
         settingsStore.save(next)
 
         if modelChanged {
-            modelError = nil
+            // Nothing needs Whisper after switching to another engine, so free its memory right away.
+            if previous.transcriptionProvider == .local, next.transcriptionProvider != .local {
+                transcriber.unloadWhisperModel()
+            }
+            // Selecting a model again clears its old error, so it gets a fresh attempt.
+            errors[modelKey(for: next)] = nil
+            publishModelState()
             refreshModelStatus()
-            if usesOnDeviceModel, modelStatus.isReady {
+            if usesOnDeviceModel, modelStatus.isReady, !transcriber.isLoaded(settings: next) {
                 prepareModel()
             }
         }
@@ -683,35 +694,47 @@ final class AppStateController: ObservableObject {
         modelStatus = transcriber.modelStatus(settings: settings)
     }
 
+    /// What a model preparation is for: each engine, and each Whisper variant, prepares independently.
+    private func modelKey(for settings: AppSettings) -> String {
+        settings.transcriptionProvider == .local
+            ? "whisper:\(settings.transcriptionModel)"
+            : settings.transcriptionProvider.rawValue
+    }
+
+    /// Shows the loading state and error of the *selected* model only.
+    private func publishModelState() {
+        let key = modelKey(for: settings)
+        if modelActivity != activities[key] { modelActivity = activities[key] }
+        if modelError != errors[key] { modelError = errors[key] }
+    }
+
     /// Downloads (if needed) and loads the selected on-device model.
     func prepareModel() {
-        guard usesOnDeviceModel, modelPreparationTask == nil else { return }
+        guard usesOnDeviceModel else { return }
         let target = settings
-        modelError = nil
-        modelActivity = modelStatus.isReady ? .loading : .downloading(0)
-        modelPreparationTask = Task { [weak self] in
+        let key = modelKey(for: target)
+        guard preparations[key] == nil else { return }
+        errors[key] = nil
+        activities[key] = modelStatus.isReady ? .loading : .downloading(0)
+        publishModelState()
+        preparations[key] = Task { [weak self] in
             guard let self else { return }
             do {
                 try await transcriber.prepare(settings: target) { [weak self] fraction in
                     Task { @MainActor in
-                        guard let self, self.modelPreparationTask != nil else { return }
-                        self.modelActivity = fraction.map { .downloading($0) } ?? .loading
+                        guard let self, self.preparations[key] != nil else { return }
+                        self.activities[key] = fraction.map { .downloading($0) } ?? .loading
+                        self.publishModelState()
                     }
                 }
             } catch {
                 Log.dictation.error("Model preparation failed: \(error.localizedDescription, privacy: .public)")
-                modelError = "Model download failed: \(error.localizedDescription)"
+                errors[key] = "Couldn't prepare the speech model: \(error.localizedDescription)"
             }
-            modelPreparationTask = nil
-            modelActivity = nil
+            preparations[key] = nil
+            activities[key] = nil
+            publishModelState()
             refreshModelStatus()
-            // The selection may have changed while this one was loading.
-            if usesOnDeviceModel,
-               settings.transcriptionProvider != target.transcriptionProvider
-                || settings.transcriptionModel != target.transcriptionModel,
-               modelStatus.isReady {
-                prepareModel()
-            }
         }
     }
 
@@ -719,7 +742,8 @@ final class AppStateController: ObservableObject {
         do {
             try transcriber.deleteDownloadedModels()
         } catch {
-            modelError = error.localizedDescription
+            errors[modelKey(for: settings)] = error.localizedDescription
+            publishModelState()
         }
         refreshModelStatus()
     }

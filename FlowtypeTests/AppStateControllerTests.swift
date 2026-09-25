@@ -268,6 +268,31 @@ final class AppStateControllerTests: XCTestCase {
         XCTAssertEqual(controller.settings.transcriptionProvider, .local)
     }
 
+    func testSwitchingBackToAppleDoesNotWaitForASlowWhisperLoad() async {
+        transcriber.whisperLoadTime = .seconds(2)
+        let controller = makeController { $0.transcriptionProvider = .apple }
+
+        controller.updateSettings { $0.transcriptionProvider = .local }
+        XCTAssertEqual(controller.modelActivity, .loading, "Whisper should be loading")
+
+        controller.updateSettings { $0.transcriptionProvider = .apple }
+        await waitUntil({ controller.modelActivity == nil }, timeout: 0.5)
+
+        XCTAssertNil(controller.modelActivity, "Apple showed Whisper's loading state")
+        XCTAssertTrue(transcriber.isLoaded(settings: controller.settings), "Apple wasn't prepared while Whisper loaded")
+    }
+
+    func testLeavingWhisperFreesItsMemoryImmediately() {
+        let controller = makeController { $0.transcriptionProvider = .local }
+
+        controller.updateSettings { $0.transcriptionProvider = .apple }
+        XCTAssertEqual(transcriber.whisperUnloadCount, 1)
+
+        // Switching between engines that aren't Whisper doesn't touch it.
+        controller.updateSettings { $0.transcriptionProvider = .groq }
+        XCTAssertEqual(transcriber.whisperUnloadCount, 1)
+    }
+
     func testIdleModelIsUnloadedButNotWhileDictating() {
         transcriber.loaded = true
         let controller = makeController()
@@ -317,6 +342,9 @@ private final class FakeTranscriber: Transcribing {
     var loaded = false
     /// Whether a Whisper model is downloaded; other engines always report ready.
     var whisperReady = true
+    /// How long preparing a Whisper model takes (Apple's model prepares immediately).
+    var whisperLoadTime: Duration = .zero
+    private var loadedProviders: Set<TranscriptionProvider> = []
     var calls = 0
     var unloadCount = 0
 
@@ -338,14 +366,25 @@ private final class FakeTranscriber: Transcribing {
     }
 
     func prepare(settings: AppSettings, progress: ModelPreparationProgress?) async throws {
-        loaded = true
+        if settings.transcriptionProvider == .local, whisperLoadTime > .zero {
+            try await Task.sleep(for: whisperLoadTime)
+        }
+        loadedProviders.insert(settings.transcriptionProvider)
     }
 
-    func isLoaded(settings: AppSettings) -> Bool { loaded }
+    func isLoaded(settings: AppSettings) -> Bool {
+        loaded || loadedProviders.contains(settings.transcriptionProvider)
+    }
 
     func unloadModel() {
         loaded = false
         unloadCount += 1
+    }
+
+    var whisperUnloadCount = 0
+    func unloadWhisperModel() {
+        loadedProviders.remove(.local)
+        whisperUnloadCount += 1
     }
 
     func deleteDownloadedModels() throws {}

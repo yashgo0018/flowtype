@@ -65,6 +65,8 @@ final class AppleSpeechTranscriptionService: Transcribing {
     /// macOS owns the model's lifetime and memory; there is nothing for the app to unload.
     func unloadModel() {}
 
+    func unloadWhisperModel() {}
+
     /// The model belongs to macOS and is shared with other apps, so Flowtype doesn't delete it.
     func deleteDownloadedModels() throws {}
 
