@@ -5,6 +5,8 @@ import SwiftUI
 @MainActor
 final class FlowBarModel: ObservableObject {
     @Published var isHovering = false
+    /// Size of the visible pill. SwiftUI animates the pill to this size inside the panel.
+    @Published var pillSize = CGSize(width: 44, height: 10)
 }
 
 @MainActor
@@ -18,7 +20,9 @@ final class FlowBarPanelController {
     private var cancellables: Set<AnyCancellable> = []
     private var currentScreen: NSScreen?
     private var wasRecording = false
-    private var collapseTask: Task<Void, Never>?
+    private var shrinkTask: Task<Void, Never>?
+    private var hoverTimer: Timer?
+    private var pointerLeftAt: Date?
 
     init(controller: AppStateController) {
         self.controller = controller
@@ -27,6 +31,9 @@ final class FlowBarPanelController {
             .environmentObject(controller.levelMeter)
             .environmentObject(model)
         let hostingView = FlowBarHostingView(rootView: rootView)
+        // The panel's frame is set only by this controller. By default SwiftUI also resizes the window
+        // to fit its content, which fought the hover animation and made the pill flicker.
+        hostingView.sizingOptions = []
         panel = FlowBarPanel(
             contentRect: NSRect(x: 0, y: 0, width: 80, height: 40),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -62,21 +69,53 @@ final class FlowBarPanelController {
             .store(in: &cancellables)
     }
 
-    private func hoverChanged(_ hovering: Bool) {
-        collapseTask?.cancel()
-        if hovering {
+    // MARK: Hover
+
+    /// Hover is decided by geometry (is the pointer over the visible pill?), re-checked on a short
+    /// timer while the pointer is near. Tracking-area events only start the checks, so window
+    /// resizes can't produce the expand/collapse loop that enter/exit events alone caused.
+    private func hoverChanged(_ entered: Bool) {
+        Log.app.debug("Dictation bar pointer \(entered ? "entered" : "exited", privacy: .public) the panel")
+        if entered && hoverTimer == nil {
+            let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.evaluateHover() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            hoverTimer = timer
+        }
+        evaluateHover()
+    }
+
+    private func evaluateHover() {
+        let pointer = NSEvent.mouseLocation
+        if pillRect().insetBy(dx: -6, dy: -6).contains(pointer) {
+            pointerLeftAt = nil
             if !model.isHovering { model.isHovering = true }
             return
         }
-        // Collapse only once the pointer has really left, not on a stray exit during a resize.
-        collapseTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard let self, !Task.isCancelled else { return }
-            if self.panel.frame.contains(NSEvent.mouseLocation) {
-                return
-            }
-            self.model.isHovering = false
+        if model.isHovering {
+            // Collapse only after the pointer has stayed off the pill briefly.
+            let leftAt = pointerLeftAt ?? Date()
+            pointerLeftAt = leftAt
+            guard Date().timeIntervalSince(leftAt) >= 0.2 else { return }
+            pointerLeftAt = nil
+            model.isHovering = false
         }
+        if !panel.frame.contains(pointer) {
+            hoverTimer?.invalidate()
+            hoverTimer = nil
+        }
+    }
+
+    /// The visible pill in screen coordinates.
+    private func pillRect() -> NSRect {
+        let frame = panel.frame
+        let size = model.pillSize
+        let x: CGFloat = switch controller.settings.flowBarPosition {
+        case .bottomCenter: frame.midX - size.width / 2
+        case .bottomRight: frame.maxX - Self.margin - size.width
+        }
+        return NSRect(x: x, y: frame.minY + Self.margin, width: size.width, height: size.height)
     }
 
     func show() {
@@ -97,16 +136,30 @@ final class FlowBarPanelController {
         wasRecording = phase.isRecording
 
         let size = FlowBarLayout.size(phase: phase, activity: activity, hovering: hovering, settings: settings)
-        let frame = frame(for: size, position: settings.flowBarPosition)
-        if panel.isVisible {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.18
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
-            }
-        } else {
-            panel.setFrame(frame, display: true)
+        // SwiftUI animates the pill; the panel itself never animates. It grows immediately and shrinks
+        // only after the pill has finished shrinking, so the pill never moves under the pointer.
+        model.pillSize = size
+        let target = frame(for: size, position: settings.flowBarPosition)
+        shrinkTask?.cancel()
+        guard panel.isVisible else {
+            panel.setFrame(target, display: true)
             panel.orderFrontRegardless()
+            return
+        }
+        let current = panel.frame
+        if target.width >= current.width && target.height >= current.height {
+            panel.setFrame(target, display: true)
+            return
+        }
+        let roomy = CGSize(
+            width: max(size.width, current.width - Self.margin * 2),
+            height: max(size.height, current.height - Self.margin * 2)
+        )
+        panel.setFrame(frame(for: roomy, position: settings.flowBarPosition), display: true)
+        shrinkTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard let self, !Task.isCancelled else { return }
+            self.panel.setFrame(target, display: true)
         }
     }
 
@@ -186,13 +239,17 @@ final class FlowBarHostingView<Content: View>: NSHostingView<Content> {
         trackingArea = area
     }
 
+    // SwiftUI routes its own tracking areas (button hover, tooltips) through these methods too;
+    // only the panel-wide area decides whether the pill is hovered.
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        guard event.trackingArea === trackingArea else { return }
         onHoverChange?(true)
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        guard event.trackingArea === trackingArea else { return }
         onHoverChange?(false)
     }
 }
@@ -217,12 +274,15 @@ struct FlowBarView: View {
                     Capsule(style: .continuous)
                         .strokeBorder(borderColor, lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
 
             content
                 .padding(.horizontal, isCollapsed ? 0 : 6)
                 .transition(.opacity)
         }
+        .frame(width: model.pillSize.width, height: model.pillSize.height)
+        .clipShape(Capsule(style: .continuous))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 3)
+        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: model.pillSize)
         .contextMenu {
             Button("Open Flowtype") { controller.showHub(.home) }
             Button("History") { controller.showHub(.history) }
@@ -231,9 +291,13 @@ struct FlowBarView: View {
             Button("Quit Flowtype") { NSApp.terminate(nil) }
         }
         .padding(FlowBarPanelController.margin)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: pillAlignment)
         .environment(\.colorScheme, .dark)
         .animation(.easeOut(duration: 0.18), value: stateKey)
+    }
+
+    private var pillAlignment: Alignment {
+        controller.settings.flowBarPosition == .bottomRight ? .bottomTrailing : .bottom
     }
 
     private var isCollapsed: Bool {
