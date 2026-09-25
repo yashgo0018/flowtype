@@ -383,7 +383,7 @@
         <div class="step reveal">
           <div class="num">02</div>
           <h3>Say it naturally</h3>
-          <p>Talk the way you would to a person. Whisper, the speech model behind Flowtype, handles punctuation and capitalization.</p>
+          <p>Talk the way you would to a person. Punctuation and capitalization are handled for you.</p>
           <div class="keys">Press <kbd>esc</kbd> to cancel</div>
         </div>
         <div class="step reveal">
@@ -410,7 +410,7 @@
         <div class="feature reveal">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
           <h3>Private by default</h3>
-          <p>Speech is transcribed on your Mac with Whisper. Audio is never saved to disk and never leaves your computer.</p>
+          <p>Speech is transcribed on your Mac with Apple's built-in speech model or Whisper. Audio is never saved to disk and never leaves your computer.</p>
         </div>
         <div class="feature reveal">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg></div>
@@ -435,7 +435,7 @@
         <div class="feature wide reveal">
           <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 1 0 6 16.9"/><path d="M12 13v8m-3-3 3 3 3-3"/></svg></div>
           <h3>Pick your engine</h3>
-          <p>Choose on-device Whisper models from fast to most accurate, or use your own Groq API key for cloud transcription. Flowtype keeps itself up to date automatically.</p>
+          <p>On macOS 26 and later, Flowtype uses Apple's built-in speech model, so there's nothing to download. Prefer Whisper? Pick a model from fast to most accurate, or use your own Groq API key for cloud transcription. Flowtype keeps itself up to date automatically.</p>
         </div>
       </div>
     </section>
@@ -466,7 +466,7 @@
         <p class="section-lede">No accounts, no analytics, no tracking. Flowtype is a tool, not a service.</p>
       </div>
       <ul>
-        <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>On-device transcription</strong>Whisper runs locally. Audio is kept in memory only while you speak.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>On-device transcription</strong>Apple's speech model or Whisper runs locally. Audio is kept in memory only while you speak.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>History you control</strong>Keep it, delete it after 24 hours, or don't save transcripts at all.</span></li>
         <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>Cloud only if you ask</strong>Groq transcription is off unless you add your own key. <a href="https://github.com/yashgo0018/flowtype/blob/main/PRIVACY.md">Read the privacy policy</a>.</span></li>
       </ul>
@@ -484,7 +484,7 @@
         </details>
         <details class="reveal">
           <summary>Which Macs does it run on?</summary>
-          <p>Macs with Apple silicon (M1 or later) running macOS 14 Sonoma or newer. The Small model, the default, runs well on any M-series Mac. Large v3 Turbo is more accurate and works best on newer chips.</p>
+          <p>Macs with Apple silicon (M1 or later) running macOS 14 Sonoma or newer. On macOS 26 and later, Flowtype uses Apple's built-in speech model, with nothing to download. On earlier versions it downloads a Whisper model once; the default Small model runs well on any M-series Mac.</p>
         </details>
         <details class="reveal">
           <summary>Why does it need Accessibility permission?</summary>
@@ -496,7 +496,7 @@
         </details>
         <details class="reveal">
           <summary>Which languages does it support?</summary>
-          <p>English for now. Dictation is tuned for English so Whisper never mistakes your speech for another language.</p>
+          <p>English for now, following your Mac's region where it can (US, UK, Indian English and more). Dictation is tuned for English so your speech is never mistaken for another language.</p>
         </details>
         <details class="reveal">
           <summary>How do updates work?</summary>

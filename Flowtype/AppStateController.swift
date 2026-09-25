@@ -129,6 +129,7 @@ final class AppStateController: ObservableObject {
     private let transcriber: Transcribing
     private let pasteService: Pasting
     private let hotKeys: HotKeyService
+    private let appleSpeechSupported: Bool
     private let currentPermissions: @MainActor () -> PermissionStatus
     private var localStore: LocalStore?
 
@@ -149,6 +150,7 @@ final class AppStateController: ObservableObject {
         transcriber: Transcribing = DefaultTranscriptionService(),
         pasteService: Pasting = PasteService(),
         hotKeys: HotKeyService = HotKeyService(),
+        appleSpeechSupported: Bool = AppleSpeech.isSupported,
         permissions: @escaping @MainActor () -> PermissionStatus = { PermissionStatus.current() }
     ) {
         let loadedSettings = settingsStore.load()
@@ -158,6 +160,7 @@ final class AppStateController: ObservableObject {
         self.transcriber = transcriber
         self.pasteService = pasteService
         self.hotKeys = hotKeys
+        self.appleSpeechSupported = appleSpeechSupported
         self.currentPermissions = permissions
         self.permissions = permissions()
         self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
@@ -202,10 +205,29 @@ final class AppStateController: ObservableObject {
         }
         maintenanceTimers = [permissionTimer, housekeepingTimer]
 
+        adoptAppleSpeechIfUseful()
+
         // Load an already-downloaded model in the background so the first dictation is fast.
-        if settings.transcriptionProvider == .local, modelStatus.isReady {
+        if usesOnDeviceModel, modelStatus.isReady {
             prepareModel()
         }
+    }
+
+    private var usesOnDeviceModel: Bool {
+        settings.transcriptionProvider != .groq
+    }
+
+    /// One-time switch to Apple's built-in model for people who never downloaded a Whisper model,
+    /// so they don't need a download at all. Anyone who already has Whisper keeps it.
+    func adoptAppleSpeechIfUseful() {
+        guard !settingsStore.appleSpeechMigrationDone else { return }
+        settingsStore.appleSpeechMigrationDone = true
+        guard appleSpeechSupported, settings.transcriptionProvider == .local else { return }
+        var whisper = settings
+        whisper.transcriptionProvider = .local
+        guard !transcriber.modelStatus(settings: whisper).isReady else { return }
+        Log.dictation.info("Switching to Apple speech recognition; no Whisper model was downloaded")
+        updateSettings { $0.transcriptionProvider = .apple }
     }
 
     /// Runs every minute: enforces history retention and frees the model when idle.
@@ -353,7 +375,7 @@ final class AppStateController: ObservableObject {
             SoundEffects.play(.start)
         }
         // Load the model while the user speaks rather than after they finish.
-        if settings.transcriptionProvider == .local, !transcriber.isLoaded(settings: settings) {
+        if usesOnDeviceModel, !transcriber.isLoaded(settings: settings) {
             prepareModel()
         }
         return true
@@ -637,7 +659,7 @@ final class AppStateController: ObservableObject {
         if modelChanged {
             modelError = nil
             refreshModelStatus()
-            if next.transcriptionProvider == .local, modelStatus.isReady {
+            if usesOnDeviceModel, modelStatus.isReady {
                 prepareModel()
             }
         }
@@ -663,7 +685,7 @@ final class AppStateController: ObservableObject {
 
     /// Downloads (if needed) and loads the selected on-device model.
     func prepareModel() {
-        guard settings.transcriptionProvider == .local, modelPreparationTask == nil else { return }
+        guard usesOnDeviceModel, modelPreparationTask == nil else { return }
         let target = settings
         modelError = nil
         modelActivity = modelStatus.isReady ? .loading : .downloading(0)
@@ -684,8 +706,9 @@ final class AppStateController: ObservableObject {
             modelActivity = nil
             refreshModelStatus()
             // The selection may have changed while this one was loading.
-            if settings.transcriptionProvider == .local,
-               settings.transcriptionModel != target.transcriptionModel,
+            if usesOnDeviceModel,
+               settings.transcriptionProvider != target.transcriptionProvider
+                || settings.transcriptionModel != target.transcriptionModel,
                modelStatus.isReady {
                 prepareModel()
             }

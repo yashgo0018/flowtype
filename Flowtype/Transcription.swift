@@ -24,19 +24,23 @@ protocol Transcribing: AnyObject {
 
 @MainActor
 final class DefaultTranscriptionService: Transcribing {
+    private let appleService: AppleSpeechTranscriptionService
     private let localService: WhisperKitTranscriptionService
     private let groqService: GroqTranscriptionService
 
     init(
+        appleService: AppleSpeechTranscriptionService = AppleSpeechTranscriptionService(),
         localService: WhisperKitTranscriptionService = WhisperKitTranscriptionService(),
         groqService: GroqTranscriptionService = GroqTranscriptionService()
     ) {
+        self.appleService = appleService
         self.localService = localService
         self.groqService = groqService
     }
 
     private func service(for settings: AppSettings) -> Transcribing {
         switch settings.transcriptionProvider {
+        case .apple: appleService
         case .local: localService
         case .groq: groqService
         }

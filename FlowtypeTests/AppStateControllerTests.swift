@@ -22,7 +22,10 @@ final class AppStateControllerTests: XCTestCase {
         UserDefaults().removePersistentDomain(forName: suiteName)
     }
 
-    private func makeController(configure: (inout AppSettings) -> Void = { _ in }) -> AppStateController {
+    private func makeController(
+        appleSpeechSupported: Bool = true,
+        configure: (inout AppSettings) -> Void = { _ in }
+    ) -> AppStateController {
         let defaults = UserDefaults(suiteName: suiteName)!
         let store = SettingsStore(defaults: defaults, apiKeyStore: UserDefaultsGroqAPIKeyStore(defaults: defaults))
         var settings = store.load()
@@ -34,6 +37,7 @@ final class AppStateControllerTests: XCTestCase {
             audio: audio,
             transcriber: transcriber,
             pasteService: paste,
+            appleSpeechSupported: appleSpeechSupported,
             permissions: { [unowned self] in self.permissions }
         )
     }
@@ -223,6 +227,47 @@ final class AppStateControllerTests: XCTestCase {
         XCTAssertEqual(controller.settings.pasteLastShortcut, AppSettings.defaults.pasteLastShortcut)
     }
 
+    // MARK: - Apple speech default
+
+    func testSwitchesToAppleSpeechWhenNoWhisperModelWasDownloaded() {
+        transcriber.whisperReady = false
+        let controller = makeController { $0.transcriptionProvider = .local }
+
+        controller.adoptAppleSpeechIfUseful()
+
+        XCTAssertEqual(controller.settings.transcriptionProvider, .apple)
+    }
+
+    func testKeepsWhisperWhenItsModelIsAlreadyDownloaded() {
+        transcriber.whisperReady = true
+        let controller = makeController { $0.transcriptionProvider = .local }
+
+        controller.adoptAppleSpeechIfUseful()
+
+        XCTAssertEqual(controller.settings.transcriptionProvider, .local)
+    }
+
+    func testAppleSpeechSwitchIsOnlyConsideredOnce() {
+        transcriber.whisperReady = true
+        let controller = makeController { $0.transcriptionProvider = .local }
+        controller.adoptAppleSpeechIfUseful()
+
+        // Even if the Whisper model disappears later, the user's choice isn't overridden.
+        transcriber.whisperReady = false
+        controller.adoptAppleSpeechIfUseful()
+
+        XCTAssertEqual(controller.settings.transcriptionProvider, .local)
+    }
+
+    func testNoSwitchOnMacsWithoutAppleSpeech() {
+        transcriber.whisperReady = false
+        let controller = makeController(appleSpeechSupported: false) { $0.transcriptionProvider = .local }
+
+        controller.adoptAppleSpeechIfUseful()
+
+        XCTAssertEqual(controller.settings.transcriptionProvider, .local)
+    }
+
     func testIdleModelIsUnloadedButNotWhileDictating() {
         transcriber.loaded = true
         let controller = makeController()
@@ -270,6 +315,8 @@ private final class FakeTranscriber: Transcribing {
     var result = "Hello world."
     var delay: Duration = .zero
     var loaded = false
+    /// Whether a Whisper model is downloaded; other engines always report ready.
+    var whisperReady = true
     var calls = 0
     var unloadCount = 0
 
@@ -283,7 +330,11 @@ private final class FakeTranscriber: Transcribing {
     }
 
     func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
-        TranscriptionModelStatus(modelName: settings.transcriptionModel, isReady: true, localPath: nil)
+        TranscriptionModelStatus(
+            modelName: settings.transcriptionModel,
+            isReady: settings.transcriptionProvider == .local ? whisperReady : true,
+            localPath: nil
+        )
     }
 
     func prepare(settings: AppSettings, progress: ModelPreparationProgress?) async throws {

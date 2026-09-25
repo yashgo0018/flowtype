@@ -12,7 +12,7 @@ Nothing is sent to us. Flowtype has no accounts, analytics, telemetry or crash r
 
 - Audio is recorded only while you dictate. The dictation bar shows a waveform and timer whenever the microphone is on.
 - Audio is kept in memory and is never written to disk. It is discarded as soon as it has been transcribed.
-- **On-device transcription (the default):** audio is transcribed on your Mac and never leaves it.
+- **On-device transcription (the default):** audio is transcribed on your Mac and never leaves it, whether you use Apple's built-in speech model (macOS 26 and later) or Whisper.
 - **Groq cloud transcription (optional, off by default):** if you choose Groq in Settings and add your own API key, each dictation's audio, plus the words in your Dictionary as spelling hints, is sent to Groq, Inc. for transcription. Groq's handling of that data is governed by [Groq's privacy policy](https://groq.com/privacy-policy/). Your API key is stored in your macOS Keychain.
 
 ## Your text and data
@@ -33,7 +33,7 @@ To insert text, Flowtype places the transcript on the clipboard, simulates ⌘V,
 
 Flowtype connects to the internet only to:
 
-- download speech models from Hugging Face (`huggingface.co`) when you first use a model;
+- download Whisper speech models from Hugging Face (`huggingface.co`) when you first use one (Apple's speech model is downloaded and managed by macOS itself, from Apple);
 - send audio to Groq, if you enabled it;
 - check for app updates on GitHub (`github.com`), which shares only your app version and macOS version, as any web request would.
 

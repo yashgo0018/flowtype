@@ -26,7 +26,7 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings, AppSettings.defaults)
         XCTAssertEqual(settings.toggleShortcut, "ctrl+option+space")
         XCTAssertEqual(settings.holdKey, .fn)
-        XCTAssertEqual(settings.transcriptionProvider, .local)
+        XCTAssertEqual(settings.transcriptionProvider, TranscriptionProvider.recommended)
         XCTAssertEqual(settings.transcriptionModel, "openai_whisper-small.en")
         XCTAssertEqual(settings.groqAPIKey, "")
         XCTAssertTrue(settings.restoreClipboardAfterPaste)

@@ -56,13 +56,15 @@ struct SettingsView: View {
 
             Section("Transcription") {
                 Picker("Engine", selection: binding(\.transcriptionProvider)) {
-                    ForEach(TranscriptionProvider.allCases) { provider in
+                    ForEach(TranscriptionProvider.available) { provider in
                         Text(provider.title).tag(provider)
                     }
                 }
                 .pickerStyle(.segmented)
 
                 switch controller.settings.transcriptionProvider {
+                case .apple:
+                    appleSpeechSettings
                 case .local:
                     localModelSettings
                 case .groq:
@@ -160,6 +162,37 @@ struct SettingsView: View {
             Button("Delete Models", role: .destructive) { controller.deleteDownloadedModels() }
         } message: {
             Text("Frees disk space. The selected model downloads again the next time you dictate.")
+        }
+    }
+
+    @ViewBuilder
+    private var appleSpeechSettings: some View {
+        LabeledContent {
+            Text("Built into macOS")
+                .foregroundStyle(.secondary)
+        } label: {
+            Text("Model")
+            Text("Fast and private. macOS manages the model, so there's nothing to download or delete.")
+        }
+        LabeledContent("Status") {
+            HStack(spacing: 10) {
+                if controller.modelActivity == nil {
+                    Circle()
+                        .fill(controller.modelError == nil ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
+                    Text(controller.modelError == nil ? "Ready" : "Unavailable")
+                        .foregroundStyle(.secondary)
+                    if controller.modelError != nil {
+                        Button("Try Again") { controller.prepareModel() }
+                    }
+                } else {
+                    ModelDownloadButton()
+                }
+            }
+        }
+        if let modelError = controller.modelError {
+            Label(modelError, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
         }
     }
 

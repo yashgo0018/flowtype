@@ -23,12 +23,12 @@
 ## Features
 
 - **Works in every app.** Mail, Slack, Notion, browsers, code editors, Terminal: if there's a text cursor, Flowtype can type there.
-- **Private by default.** Speech is transcribed on your Mac with [Whisper](https://github.com/openai/whisper). Audio is kept in memory only and never saved.
+- **Private by default.** Speech is transcribed on your Mac, using Apple's built-in speech model on macOS 26 or later and [Whisper](https://github.com/openai/whisper) otherwise. Audio is kept in memory only and never saved.
 - **Dictionary.** Teach it names, jargon and acronyms so they're spelled right every time.
 - **Snippets.** Say a short cue like “my calendar link” and get the full text.
 - **Careful with your data.** Flowtype won't dictate into password fields, and it restores your clipboard after pasting.
 - **History and stats.** Search past dictations and see your words, speaking pace, time saved and streak.
-- **Choice of engine.** On-device Whisper (Base, Small or Large v3 Turbo), or Groq cloud transcription with your own API key.
+- **Choice of engine.** Apple's built-in speech recognition (macOS 26+, nothing to download), on-device Whisper (Base, Small or Large v3 Turbo), or Groq cloud transcription with your own API key.
 - **Automatic updates**, signed and notarized by Apple.
 
 <p align="center">
@@ -41,7 +41,7 @@
 2. Open Flowtype. The Home screen walks you through setup:
    - **Microphone**, to hear you.
    - **Accessibility**, to type into other apps and detect the push-to-talk key.
-   - **Speech model**, downloaded once (about 480 MB for the default model).
+   - **Speech model:** nothing to download on macOS 26 or later, which uses Apple's built-in model. On earlier versions, Flowtype downloads a Whisper model once (about 480 MB).
 3. Optional: in **System Settings → Keyboard**, set **“Press 🌐 key to”** to **Do Nothing**, so holding Fn doesn't also open the emoji picker.
 
 Requires macOS 14 Sonoma or later on Apple silicon.
@@ -96,6 +96,7 @@ Builds are signed with the Infinitum Consulting team. To build under your own ac
 | `Flowtype/AppStateController.swift` | Dictation state machine: record → transcribe → paste |
 | `Flowtype/AudioRecorder.swift` | 16 kHz mono capture, levels, microphone selection |
 | `Flowtype/Transcription.swift` | WhisperKit (on-device) and Groq transcription |
+| `Flowtype/AppleSpeechTranscription.swift` | Apple's on-device speech model (SpeechAnalyzer, macOS 26+) |
 | `Flowtype/PasteService.swift` | Typing into the frontmost app, clipboard restore |
 | `Flowtype/HotKeyService.swift` | Global shortcuts and the push-to-talk key |
 | `Flowtype/TextProcessing.swift` | Transcript cleanup, dictionary and snippets |
@@ -112,7 +113,7 @@ Issues and pull requests are welcome. For anything larger than a small fix, plea
 
 ## Acknowledgements
 
-Flowtype is built on [WhisperKit](https://github.com/argmaxinc/WhisperKit) and OpenAI's [Whisper](https://github.com/openai/whisper) models, and uses [Sparkle](https://sparkle-project.org) for updates. The full list is in the app under **Settings → About**.
+Flowtype transcribes with Apple's [Speech](https://developer.apple.com/documentation/speech) framework, [WhisperKit](https://github.com/argmaxinc/WhisperKit) and OpenAI's [Whisper](https://github.com/openai/whisper) models, and uses [Sparkle](https://sparkle-project.org) for updates. The full list is in the app under **Settings → About**.
 
 ## License
 

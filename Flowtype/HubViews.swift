@@ -95,6 +95,8 @@ private struct SidebarStatusView: View {
 
     private var engineTitle: String {
         switch controller.settings.transcriptionProvider {
+        case .apple:
+            return "On-device · Apple Speech"
         case .local:
             let model = WhisperModelOption.option(for: controller.settings.transcriptionModel)?.title ?? "Whisper"
             return "On-device · \(model)"
@@ -164,9 +166,17 @@ struct HomeView: View {
     }
 
     private var showsSetup: Bool {
-        controller.needsSetup || !controller.permissions.microphoneGranted
-            || (controller.settings.transcriptionProvider == .local && !controller.modelStatus.isReady)
-            || controller.modelActivity != nil
+        if controller.needsSetup || !controller.permissions.microphoneGranted || controller.modelError != nil {
+            return true
+        }
+        if controller.settings.transcriptionProvider == .local && !controller.modelStatus.isReady {
+            return true
+        }
+        // A model already on disk loads briefly at launch; only a real download is worth showing.
+        if case .downloading = controller.modelActivity {
+            return true
+        }
+        return false
     }
 
     private var greeting: String {
@@ -348,6 +358,19 @@ private struct ModelSetupRow: View {
 
     var body: some View {
         switch controller.settings.transcriptionProvider {
+        case .apple:
+            SetupRow(
+                systemImage: "waveform",
+                title: "Speech model",
+                detail: controller.modelError ?? "Apple's built-in speech recognition runs privately on your Mac. Nothing to download.",
+                isDone: controller.modelActivity == nil && controller.modelError == nil
+            ) {
+                if controller.modelActivity == nil {
+                    Button("Try Again") { controller.prepareModel() }
+                } else {
+                    ModelDownloadButton()
+                }
+            }
         case .local:
             let option = WhisperModelOption.option(for: controller.settings.transcriptionModel)
             SetupRow(

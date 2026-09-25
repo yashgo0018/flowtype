@@ -33,6 +33,9 @@ enum FlowBarPosition: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
+    /// Apple's built-in on-device model (macOS 26+). Raw value "apple".
+    case apple
+    /// Whisper via WhisperKit, on-device. Raw value kept as "local" for existing settings.
     case local
     case groq
 
@@ -40,9 +43,20 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .local: "On-device"
+        case .apple: "Apple"
+        case .local: "Whisper"
         case .groq: "Groq cloud"
         }
+    }
+
+    /// Engines this Mac can run.
+    static var available: [TranscriptionProvider] {
+        AppleSpeech.isSupported ? allCases : allCases.filter { $0 != .apple }
+    }
+
+    /// Apple's model where supported (nothing to download), otherwise Whisper.
+    static var recommended: TranscriptionProvider {
+        AppleSpeech.isSupported ? .apple : .local
     }
 }
 
@@ -145,21 +159,23 @@ struct AppSettings: Equatable, Sendable {
     var restoreClipboardAfterPaste: Bool
     var retentionPolicy: RetentionPolicy
 
-    static let defaults = AppSettings(
-        toggleShortcut: "ctrl+option+space",
-        holdKey: .fn,
-        pasteLastShortcut: "cmd+ctrl+v",
-        transcriptionProvider: .local,
-        transcriptionModel: defaultTranscriptionModel,
-        groqAPIKey: "",
-        microphoneUID: "",
-        flowBarPosition: .bottomCenter,
-        showInDock: true,
-        showFlowBarWhenIdle: true,
-        playSounds: true,
-        restoreClipboardAfterPaste: true,
-        retentionPolicy: .normal
-    )
+    static var defaults: AppSettings {
+        AppSettings(
+            toggleShortcut: "ctrl+option+space",
+            holdKey: .fn,
+            pasteLastShortcut: "cmd+ctrl+v",
+            transcriptionProvider: .recommended,
+            transcriptionModel: defaultTranscriptionModel,
+            groqAPIKey: "",
+            microphoneUID: "",
+            flowBarPosition: .bottomCenter,
+            showInDock: true,
+            showFlowBarWhenIdle: true,
+            playSounds: true,
+            restoreClipboardAfterPaste: true,
+            retentionPolicy: .normal
+        )
+    }
 
     var hasGroqAPIKey: Bool {
         !groqAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -189,6 +205,7 @@ final class SettingsStore {
         static let playSounds = "feedback.playSounds"
         static let restoreClipboardAfterPaste = "clipboard.restoreAfterPaste"
         static let retentionPolicy = "retention.policy"
+        static let appleSpeechMigrationDone = "transcription.appleSpeechMigrationDone"
     }
 
     private let defaults: UserDefaults
@@ -197,6 +214,12 @@ final class SettingsStore {
     init(defaults: UserDefaults = .standard, apiKeyStore: GroqAPIKeyStoring = KeychainGroqAPIKeyStore()) {
         self.defaults = defaults
         self.apiKeyStore = apiKeyStore
+    }
+
+    /// Whether existing users have been considered for the switch to Apple speech (done once).
+    var appleSpeechMigrationDone: Bool {
+        get { defaults.bool(forKey: Key.appleSpeechMigrationDone) }
+        set { defaults.set(newValue, forKey: Key.appleSpeechMigrationDone) }
     }
 
     func load() -> AppSettings {
@@ -208,7 +231,7 @@ final class SettingsStore {
             toggleShortcut: toggle,
             holdKey: defaults.string(forKey: Key.holdShortcut).map(HoldKey.init(storedValue:)) ?? fallback.holdKey,
             pasteLastShortcut: pasteLast == toggle ? "" : pasteLast,
-            transcriptionProvider: TranscriptionProvider(rawValue: defaults.string(forKey: Key.transcriptionProvider) ?? "") ?? fallback.transcriptionProvider,
+            transcriptionProvider: Self.availableProvider(defaults.string(forKey: Key.transcriptionProvider)) ?? fallback.transcriptionProvider,
             transcriptionModel: Self.normalizeTranscriptionModel(defaults.string(forKey: Key.transcriptionModel) ?? fallback.transcriptionModel),
             groqAPIKey: apiKeyStore.loadAPIKey(),
             microphoneUID: defaults.string(forKey: Key.microphoneUID) ?? fallback.microphoneUID,
@@ -235,6 +258,12 @@ final class SettingsStore {
         defaults.set(settings.restoreClipboardAfterPaste, forKey: Key.restoreClipboardAfterPaste)
         defaults.set(settings.retentionPolicy.rawValue, forKey: Key.retentionPolicy)
         apiKeyStore.saveAPIKey(settings.groqAPIKey)
+    }
+
+    /// A stored engine this Mac can still run (settings may come from a newer macOS or another Mac).
+    private static func availableProvider(_ stored: String?) -> TranscriptionProvider? {
+        guard let provider = stored.flatMap(TranscriptionProvider.init(rawValue:)) else { return nil }
+        return TranscriptionProvider.available.contains(provider) ? provider : nil
     }
 
     static func normalizeTranscriptionModel(_ model: String) -> String {
