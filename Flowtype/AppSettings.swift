@@ -43,10 +43,22 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
 
     var title: String {
         switch self {
-        case .apple: "Apple"
+        case .apple: "Apple (built-in)"
         case .local: "Whisper"
-        case .groq: "Groq cloud"
+        case .groq: "Groq"
         }
+    }
+
+    var detail: String {
+        switch self {
+        case .apple: "Built into macOS. Fast and private, with nothing to download."
+        case .local: "OpenAI's Whisper, downloaded once and run on your Mac."
+        case .groq: "Whisper Large v3 Turbo on Groq's servers, using your own API key."
+        }
+    }
+
+    var location: InferenceLocation {
+        self == .groq ? .cloud : .local
     }
 
     /// Engines this Mac can run.
@@ -57,6 +69,33 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable, Sendable {
     /// Apple's model where supported (nothing to download), otherwise Whisper.
     static var recommended: TranscriptionProvider {
         AppleSpeech.isSupported ? .apple : .local
+    }
+}
+
+/// Where speech is transcribed: the top-level engine choice in Settings.
+enum InferenceLocation: String, CaseIterable, Identifiable, Sendable {
+    case local
+    case cloud
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .local: "Local"
+        case .cloud: "Cloud"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .local: "Runs on your Mac. Audio never leaves it."
+        case .cloud: "Audio is sent to the provider you choose."
+        }
+    }
+
+    /// Engines in this category that this Mac can run, recommended first.
+    var providers: [TranscriptionProvider] {
+        TranscriptionProvider.available.filter { $0.location == self }
     }
 }
 

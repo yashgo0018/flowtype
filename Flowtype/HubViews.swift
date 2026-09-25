@@ -96,12 +96,12 @@ private struct SidebarStatusView: View {
     private var engineTitle: String {
         switch controller.settings.transcriptionProvider {
         case .apple:
-            return "On-device · Apple Speech"
+            return "Local · Apple"
         case .local:
-            let model = WhisperModelOption.option(for: controller.settings.transcriptionModel)?.title ?? "Whisper"
-            return "On-device · \(model)"
+            let variant = WhisperModelOption.option(for: controller.settings.transcriptionModel)?.title ?? "Small (English)"
+            return "Local · Whisper \(variant)"
         case .groq:
-            return "Groq cloud · Whisper Turbo"
+            return "Cloud · Groq"
         }
     }
 }

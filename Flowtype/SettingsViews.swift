@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var microphones: [AudioInputDevice] = []
     @State private var confirmingDeleteHistory = false
     @State private var confirmingDeleteModels = false
+    @State private var lastLocalProvider = TranscriptionProvider.recommended
 
     var body: some View {
         Form {
@@ -55,20 +56,21 @@ struct SettingsView: View {
             }
 
             Section("Transcription") {
-                Picker("Engine", selection: binding(\.transcriptionProvider)) {
-                    ForEach(TranscriptionProvider.available) { provider in
-                        Text(provider.title).tag(provider)
+                Picker(selection: locationBinding) {
+                    ForEach(InferenceLocation.allCases) { location in
+                        Text(location.title).tag(location)
                     }
+                } label: {
+                    Text("Inference")
+                    Text(provider.location.detail)
                 }
                 .pickerStyle(.segmented)
 
-                switch controller.settings.transcriptionProvider {
-                case .apple:
-                    appleSpeechSettings
+                switch provider.location {
                 case .local:
-                    localModelSettings
-                case .groq:
-                    groqSettings
+                    localInferenceSettings
+                case .cloud:
+                    cloudInferenceSettings
                 }
 
                 Picker("Microphone", selection: binding(\.microphoneUID)) {
@@ -147,6 +149,11 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+        .onChange(of: controller.settings.transcriptionProvider, initial: true) { _, newValue in
+            if newValue.location == .local {
+                lastLocalProvider = newValue
+            }
+        }
         .onAppear {
             apiKeyDraft = controller.settings.groqAPIKey
             microphones = AudioDevices.inputDevices()
@@ -165,15 +172,59 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Inference
+
+    private var provider: TranscriptionProvider {
+        controller.settings.transcriptionProvider
+    }
+
+    /// Local ↔ Cloud. Switching back to Local restores the local model used before.
+    private var locationBinding: Binding<InferenceLocation> {
+        Binding(
+            get: { provider.location },
+            set: { location in
+                guard location != provider.location else { return }
+                let next = location == .local ? lastLocalProvider : (location.providers.first ?? .groq)
+                apply { $0.transcriptionProvider = next }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var localInferenceSettings: some View {
+        let models = InferenceLocation.local.providers
+        // On Macs without Apple speech, Whisper is the only local model, so skip the choice.
+        if models.count > 1 {
+            Picker(selection: binding(\.transcriptionProvider)) {
+                ForEach(models) { model in
+                    Text(model.title).tag(model)
+                }
+            } label: {
+                Text("Model")
+                Text(provider.detail)
+            }
+        }
+        switch provider {
+        case .apple: appleSpeechSettings
+        default: whisperSettings(showsVariantLabel: models.count > 1)
+        }
+    }
+
+    @ViewBuilder
+    private var cloudInferenceSettings: some View {
+        Picker(selection: binding(\.transcriptionProvider)) {
+            ForEach(InferenceLocation.cloud.providers) { cloudProvider in
+                Text(cloudProvider.title).tag(cloudProvider)
+            }
+        } label: {
+            Text("Provider")
+            Text(provider.detail)
+        }
+        groqSettings
+    }
+
     @ViewBuilder
     private var appleSpeechSettings: some View {
-        LabeledContent {
-            Text("Built into macOS")
-                .foregroundStyle(.secondary)
-        } label: {
-            Text("Model")
-            Text("Fast and private. macOS manages the model, so there's nothing to download or delete.")
-        }
         LabeledContent("Status") {
             HStack(spacing: 10) {
                 if controller.modelActivity == nil {
@@ -197,13 +248,13 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private var localModelSettings: some View {
+    private func whisperSettings(showsVariantLabel: Bool) -> some View {
         Picker(selection: binding(\.transcriptionModel)) {
             ForEach(WhisperModelOption.all) { option in
                 Text(option.title).tag(option.id)
             }
         } label: {
-            Text("Model")
+            Text(showsVariantLabel ? "Variant" : "Whisper model")
             Text(WhisperModelOption.option(for: controller.settings.transcriptionModel)?.detail ?? "")
         }
 
@@ -244,7 +295,6 @@ struct SettingsView: View {
             Link("Get a free key", destination: URL(string: "https://console.groq.com/keys")!)
                 .font(.caption)
         }
-        LabeledContent("Model", value: AppSettings.groqTranscriptionModel)
         Label("Audio is sent to Groq for transcription. The key is stored in your Keychain.", systemImage: "lock.shield")
             .font(.callout)
             .foregroundStyle(.secondary)
