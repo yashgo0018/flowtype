@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flowtype — Dictation for Mac that types for you</title>
+  <meta name="description" content="Hold Fn, speak, and your words appear in any app. Flowtype is a free dictation app for Mac that transcribes privately on your device.">
+  <meta name="theme-color" content="#0b0a1a">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Flowtype — Dictation for Mac that types for you">
+  <meta property="og:description" content="Hold Fn, speak, and your words appear in any app. Private, on-device transcription.">
+  <meta property="og:image" content="https://yashgo0018.github.io/flowtype/assets/icon.png">
+  <meta name="twitter:card" content="summary">
+  <style>
+    :root {
+      --bg: #0b0a1a;
+      --bg-raised: #14132a;
+      --bg-card: rgba(255, 255, 255, 0.035);
+      --border: rgba(255, 255, 255, 0.09);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --text: #f4f3ff;
+      --text-muted: #a9a6c9;
+      --text-faint: #6f6c91;
+      --indigo: #4f6bff;
+      --violet: #8a2fe0;
+      --mint: #6ff5d2;
+      --red: #ff5a5f;
+      --radius: 18px;
+      --max: 1120px;
+      --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+      --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+      --mono: "SF Mono", ui-monospace, Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 17px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    a { color: inherit; }
+    img { max-width: 100%; height: auto; display: block; }
+
+    .wrap { width: min(var(--max), 100% - 40px); margin-inline: auto; }
+
+    /* Ambient glow behind the hero */
+    .glow {
+      position: absolute; inset: -20vh 0 auto 0; height: 110vh; z-index: -1; pointer-events: none;
+      background:
+        radial-gradient(60% 50% at 30% 20%, rgba(79, 107, 255, 0.35), transparent 70%),
+        radial-gradient(50% 45% at 75% 30%, rgba(138, 47, 224, 0.32), transparent 70%),
+        radial-gradient(35% 30% at 55% 70%, rgba(111, 245, 210, 0.10), transparent 70%);
+      filter: blur(10px);
+    }
+
+    /* Nav */
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      backdrop-filter: saturate(160%) blur(18px);
+      -webkit-backdrop-filter: saturate(160%) blur(18px);
+      background: rgba(11, 10, 26, 0.6);
+      border-bottom: 1px solid transparent;
+      transition: border-color .2s;
+    }
+    nav.scrolled { border-bottom-color: var(--border); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; text-decoration: none; letter-spacing: -0.01em; }
+    .brand img { width: 30px; height: 30px; }
+    .nav-links { display: flex; align-items: center; gap: 28px; font-size: 15px; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; transition: color .15s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-links a.btn-primary, .nav-links a.btn-primary:hover { color: white; }
+    @media (max-width: 720px) { .nav-links a.hide-sm { display: none; } }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 13px 22px; border-radius: 999px;
+      font-weight: 600; font-size: 16px; text-decoration: none;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s;
+    }
+    .btn:hover { transform: translateY(-1px); }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      color: white;
+      box-shadow: 0 10px 30px -10px rgba(110, 70, 255, 0.8), inset 0 1px 0 rgba(255,255,255,.25);
+    }
+    .btn-primary:hover { box-shadow: 0 14px 36px -10px rgba(110, 70, 255, 0.95), inset 0 1px 0 rgba(255,255,255,.25); }
+    .btn-ghost { border: 1px solid var(--border-strong); color: var(--text); background: rgba(255,255,255,0.03); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.07); }
+    .btn-sm { padding: 8px 16px; font-size: 14px; }
+    .btn svg { width: 18px; height: 18px; flex: none; }
+
+    /* Hero */
+    header.hero { position: relative; padding: 72px 0 40px; text-align: center; }
+    .pill-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 999px;
+      border: 1px solid var(--border-strong); background: rgba(255,255,255,0.04);
+      color: var(--text-muted); font-size: 14px;
+    }
+    .pill-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 10px var(--mint); }
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(48px, 8vw, 92px);
+      line-height: 1.02; letter-spacing: -0.045em; font-weight: 800;
+      margin: 26px 0 20px;
+    }
+    h1 .grad {
+      background: linear-gradient(100deg, #8ea0ff 0%, #b98cff 45%, var(--mint) 100%);
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .lede { font-size: clamp(18px, 2.2vw, 21px); color: var(--text-muted); max-width: 640px; margin: 0 auto 34px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .fineprint { margin-top: 16px; font-size: 14px; color: var(--text-faint); }
+
+    /* Demo */
+    .demo { margin: 64px auto 0; width: min(880px, 100%); perspective: 1600px; }
+    .window {
+      position: relative; text-align: left;
+      background: linear-gradient(180deg, #1b1a33, #141327);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      box-shadow: 0 50px 120px -30px rgba(0,0,0,.8), 0 0 0 1px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.06);
+      overflow: hidden;
+    }
+    .titlebar { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+    .titlebar i { width: 12px; height: 12px; border-radius: 50%; background: #3a3957; }
+    .titlebar i:nth-child(1) { background: #ff5f57; }
+    .titlebar i:nth-child(2) { background: #febc2e; }
+    .titlebar i:nth-child(3) { background: #28c840; }
+    .titlebar span { flex: 1; text-align: center; font-size: 13px; color: var(--text-faint); margin-right: 52px; }
+    .doc { padding: 34px 44px 150px; min-height: 360px; font-size: 18px; line-height: 1.75; color: #dcdaf5; }
+    .doc .to { color: var(--text-faint); font-size: 15px; margin-bottom: 18px; }
+    .doc p { margin: 0 0 14px; }
+    .typed { white-space: pre-wrap; }
+    .caret { display: inline-block; width: 2px; height: 1.15em; margin-left: 1px; vertical-align: -0.2em; background: var(--mint); animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .typed .fresh { background: rgba(111, 245, 210, 0.16); border-radius: 4px; transition: background 1.2s ease; }
+    .typed .fresh.settled { background: transparent; }
+
+    /* Dictation bar replica */
+    .bar-dock { position: absolute; left: 0; right: 0; bottom: 26px; display: flex; justify-content: center; pointer-events: none; }
+    .bar {
+      display: flex; align-items: center; gap: 12px;
+      height: 44px; padding: 0 8px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #292929, #121212);
+      border: 1px solid rgba(255,255,255,.18);
+      box-shadow: 0 10px 28px rgba(0,0,0,.55);
+      color: white; font-size: 13px; font-weight: 600;
+      width: 60px; overflow: hidden; white-space: nowrap;
+      transition: width .45s cubic-bezier(.2,.9,.25,1.05), border-color .3s;
+    }
+    .bar > * { opacity: 0; transition: opacity .25s; }
+    .bar[data-state="recording"] { width: 300px; border-color: rgba(255, 90, 95, .6); }
+    .bar[data-state="transcribing"] { width: 168px; }
+    .bar[data-state="pasted"] { width: 172px; }
+    .bar[data-state="idle"] { width: 54px; height: 12px; padding: 0; }
+    .bar[data-state="recording"] .rec,
+    .bar[data-state="transcribing"] .trans,
+    .bar[data-state="pasted"] .done { opacity: 1; }
+    .bar .slot { position: absolute; display: flex; align-items: center; gap: 12px; }
+    .bar { position: relative; }
+    .rec { left: 8px; right: 8px; }
+    .rec .wave { flex: 1; display: flex; align-items: center; justify-content: center; gap: 3px; height: 26px; }
+    .rec .wave b { width: 3px; border-radius: 3px; background: rgba(255,255,255,.9); height: 4px; animation: wave 0.9s ease-in-out infinite; }
+    @keyframes wave { 0%, 100% { height: 4px; } 50% { height: var(--h, 18px); } }
+    .circle { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+    .circle.x { background: rgba(255,255,255,.12); }
+    .circle.stop { background: var(--red); }
+    .circle.stop::after { content: ""; width: 9px; height: 9px; border-radius: 2px; background: white; }
+    .circle.x::before, .circle.x::after { content: ""; position: absolute; width: 11px; height: 2px; border-radius: 1px; background: rgba(255,255,255,.85); }
+    .circle.x { position: relative; }
+    .circle.x::before { transform: rotate(45deg); }
+    .circle.x::after { transform: rotate(-45deg); }
+    .timer { font-variant-numeric: tabular-nums; color: rgba(255,255,255,.75); font-weight: 500; }
+    .trans { left: 18px; }
+    .dots { display: flex; gap: 5px; }
+    .dots i { width: 7px; height: 7px; border-radius: 50%; background: white; animation: pulse 1s ease-in-out infinite; }
+    .dots i:nth-child(2) { animation-delay: .15s; }
+    .dots i:nth-child(3) { animation-delay: .3s; }
+    @keyframes pulse { 0%, 100% { opacity: .3; transform: scale(.75); } 50% { opacity: 1; transform: scale(1); } }
+    .done { left: 16px; }
+    .check { width: 20px; height: 20px; border-radius: 50%; background: #30d158; display: grid; place-items: center; }
+    .check::after { content: ""; width: 5px; height: 9px; border: solid white; border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+    .done small { display: block; font-weight: 500; font-size: 11px; color: rgba(255,255,255,.65); }
+
+    .keyhint {
+      position: absolute; right: 22px; bottom: 22px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; color: var(--text-faint);
+    }
+    @media (max-width: 640px) {
+      .doc { padding: 26px 22px 130px; font-size: 16.5px; }
+      .keyhint { display: none; }
+    }
+    kbd {
+      font-family: var(--font); font-size: 13px; font-weight: 600; color: var(--text);
+      min-width: 30px; padding: 4px 9px; border-radius: 7px; text-align: center;
+      background: linear-gradient(180deg, #2c2b49, #211f3b);
+      border: 1px solid var(--border-strong); border-bottom-width: 2px;
+      transition: transform .12s, background .12s, border-color .12s;
+    }
+    kbd.down { transform: translateY(1px); background: linear-gradient(180deg, #3a3470, #2c2760); border-color: rgba(111,245,210,.6); }
+
+    /* Sections */
+    section { padding: 110px 0 0; }
+    .eyebrow { color: var(--mint); font-weight: 700; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+    h2 {
+      font-family: var(--font-display);
+      font-size: clamp(34px, 4.6vw, 52px); line-height: 1.08; letter-spacing: -0.035em; font-weight: 800;
+      margin: 12px 0 16px;
+    }
+    .section-lede { color: var(--text-muted); font-size: 19px; max-width: 640px; margin: 0; }
+    .center { text-align: center; }
+    .center .section-lede { margin-inline: auto; }
+
+    /* Steps */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
+    .step { padding: 28px; border-radius: var(--radius); background: var(--bg-card); border: 1px solid var(--border); }
+    .step .num { font-family: var(--mono); color: var(--text-faint); font-size: 13px; }
+    .step h3 { font-size: 21px; margin: 14px 0 8px; letter-spacing: -0.01em; }
+    .step p { margin: 0; color: var(--text-muted); font-size: 16px; }
+    .step .keys { display: flex; gap: 6px; margin-top: 18px; flex-wrap: wrap; align-items: center; color: var(--text-faint); font-size: 14px; }
+    @media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
+
+    /* Features */
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
+    .feature {
+      position: relative; padding: 28px; border-radius: var(--radius);
+      background: var(--bg-card); border: 1px solid var(--border); overflow: hidden;
+      transition: border-color .2s, transform .2s;
+    }
+    .feature:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+    .feature .icon {
+      width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+      background: linear-gradient(135deg, rgba(79,107,255,.25), rgba(138,47,224,.25));
+      border: 1px solid rgba(255,255,255,.1);
+    }
+    .feature .icon svg { width: 22px; height: 22px; stroke: #cfc8ff; }
+    .feature h3 { font-size: 19px; margin: 18px 0 8px; letter-spacing: -0.01em; }
+    .feature p { margin: 0; color: var(--text-muted); font-size: 15.5px; }
+    .feature.wide { grid-column: span 2; }
+    @media (max-width: 960px) { .features { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 620px) { .features { grid-template-columns: 1fr; } .feature.wide { grid-column: auto; } }
+
+    /* Showcase */
+    .showcase { margin-top: 56px; display: grid; grid-template-columns: 1.55fr 1fr; gap: 28px; align-items: center; }
+    .shot {
+      border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border-strong);
+      box-shadow: 0 40px 100px -30px rgba(0,0,0,.8);
+      background: #1e1e1e;
+    }
+    .shot .titlebar { background: #262626; border-bottom-color: rgba(255,255,255,.06); }
+    .bars { display: grid; gap: 14px; }
+    .bars figure { margin: 0; padding: 18px; border-radius: var(--radius); background: var(--bg-card); border: 1px solid var(--border); }
+    .bars img { width: auto; max-height: 64px; margin: 0 auto; }
+    .bars figcaption { text-align: center; color: var(--text-muted); font-size: 14px; margin-top: 8px; }
+    @media (max-width: 900px) { .showcase { grid-template-columns: 1fr; } }
+
+    /* Privacy */
+    .privacy {
+      margin-top: 110px; padding: 64px; border-radius: 28px; position: relative; overflow: hidden;
+      background:
+        radial-gradient(80% 120% at 0% 0%, rgba(79,107,255,.22), transparent 60%),
+        radial-gradient(70% 120% at 100% 100%, rgba(111,245,210,.12), transparent 60%),
+        var(--bg-raised);
+      border: 1px solid var(--border-strong);
+      display: grid; grid-template-columns: 1.1fr 1fr; gap: 48px; align-items: center;
+    }
+    .privacy h2 { margin-top: 8px; }
+    .privacy ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 16px; }
+    .privacy li { display: flex; gap: 14px; color: var(--text-muted); }
+    .privacy li strong { color: var(--text); display: block; }
+    .privacy li svg { width: 22px; height: 22px; flex: none; stroke: var(--mint); margin-top: 3px; }
+    .privacy a { color: var(--mint); }
+    @media (max-width: 860px) { .privacy { grid-template-columns: 1fr; padding: 36px 26px; } }
+
+    /* FAQ */
+    .faq { max-width: 780px; margin: 44px auto 0; }
+    details { border-bottom: 1px solid var(--border); padding: 20px 4px; }
+    summary { cursor: pointer; font-weight: 600; font-size: 18px; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: var(--text-faint); font-weight: 400; font-size: 24px; line-height: 1; transition: transform .2s; }
+    details[open] summary::after { transform: rotate(45deg); }
+    details p { color: var(--text-muted); margin: 12px 0 0; font-size: 16px; }
+    code { font-family: var(--mono); font-size: .88em; padding: 2px 6px; border-radius: 6px; background: rgba(255,255,255,.07); }
+
+    /* Final CTA */
+    .final { text-align: center; padding: 120px 0 100px; }
+    .final img { width: 96px; height: 96px; margin: 0 auto 26px; filter: drop-shadow(0 20px 40px rgba(110,70,255,.45)); }
+
+    footer { border-top: 1px solid var(--border); padding: 30px 0 44px; color: var(--text-faint); font-size: 14px; }
+    .footer-inner { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+    footer a { color: var(--text-muted); text-decoration: none; margin-left: 22px; }
+    footer a:first-child { margin-left: 0; }
+    footer a:hover { color: var(--text); }
+
+    /* Reveal on scroll */
+    .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+
+  <nav id="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><img src="assets/icon.png" alt="">Flowtype</a>
+      <div class="nav-links">
+        <a class="hide-sm" href="#how">How it works</a>
+        <a class="hide-sm" href="#features">Features</a>
+        <a class="hide-sm" href="#privacy">Privacy</a>
+        <a class="hide-sm" href="https://github.com/yashgo0018/flowtype">GitHub</a>
+        <a class="btn btn-primary btn-sm" href="https://github.com/yashgo0018/flowtype/releases/latest/download/Flowtype.dmg">Download</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="wrap">
+      <span class="pill-badge"><span class="dot"></span>Free for Mac · Version 0.2</span>
+      <h1>Speak.<br><span class="grad">It types.</span></h1>
+      <p class="lede">Hold <strong>Fn</strong>, say what you mean, and let go. Flowtype turns your voice into text in whatever app you're using, transcribed privately on your Mac.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/yashgo0018/flowtype/releases/latest/download/Flowtype.dmg">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.37 12.6c-.02-2.3 1.88-3.4 1.96-3.46-1.07-1.56-2.73-1.78-3.32-1.8-1.41-.14-2.76.83-3.47.83-.72 0-1.82-.81-3-.79-1.54.02-2.96.9-3.76 2.28-1.6 2.78-.41 6.9 1.15 9.15.76 1.1 1.67 2.34 2.86 2.3 1.15-.05 1.58-.74 2.97-.74 1.38 0 1.77.74 2.98.72 1.24-.02 2.02-1.12 2.77-2.23.87-1.28 1.23-2.52 1.25-2.58-.03-.01-2.4-.92-2.42-3.66zM14.1 5.84c.63-.77 1.06-1.83.94-2.89-.91.04-2.02.61-2.67 1.37-.58.67-1.1 1.76-.96 2.8 1.02.08 2.06-.51 2.69-1.28z"/></svg>
+          Download for Mac
+        </a>
+        <a class="btn btn-ghost" href="https://github.com/yashgo0018/flowtype">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>
+          View source
+        </a>
+      </div>
+      <p class="fineprint">macOS 14 Sonoma or later · Apple Silicon · Signed &amp; notarized by Apple</p>
+
+      <div class="demo reveal" aria-label="Animated demo: dictating an email reply">
+        <div class="window">
+          <div class="titlebar"><i></i><i></i><i></i><span>Reply — Mail</span></div>
+          <div class="doc">
+            <div class="to">To: Priya &nbsp;·&nbsp; Re: Launch checklist</div>
+            <p>Hi Priya,</p>
+            <p><span class="typed" id="typed"></span><span class="caret"></span></p>
+          </div>
+          <div class="bar-dock">
+            <div class="bar" id="bar" data-state="idle">
+              <div class="slot rec">
+                <span class="circle x"></span>
+                <span class="wave" id="wave"></span>
+                <span class="timer" id="timer">0:00</span>
+                <span class="circle stop"></span>
+              </div>
+              <div class="slot trans"><span class="dots"><i></i><i></i><i></i></span>Transcribing</div>
+              <div class="slot done"><span class="check"></span><span>Pasted<small id="words">26 words</small></span></div>
+            </div>
+          </div>
+          <div class="keyhint"><kbd id="fnkey">fn</kbd><span id="keyhint-text">hold to talk</span></div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="how" class="center">
+      <div class="reveal">
+        <div class="eyebrow">How it works</div>
+        <h2>As fast as talking.<br>Because it is.</h2>
+        <p class="section-lede">Most people speak three times faster than they type. Flowtype puts that speed into every text field on your Mac.</p>
+      </div>
+      <div class="steps" style="text-align:left">
+        <div class="step reveal">
+          <div class="num">01</div>
+          <h3>Hold the key</h3>
+          <p>Hold Fn in any app: email, Slack, your code editor, a browser tab. A small bar at the bottom of the screen starts listening.</p>
+          <div class="keys"><kbd>fn</kbd> or <kbd>⌃</kbd><kbd>⌥</kbd><kbd>Space</kbd></div>
+        </div>
+        <div class="step reveal">
+          <div class="num">02</div>
+          <h3>Say it naturally</h3>
+          <p>Talk the way you would to a person. Whisper, the speech model behind Flowtype, handles punctuation and capitalization.</p>
+          <div class="keys">Press <kbd>esc</kbd> to cancel</div>
+        </div>
+        <div class="step reveal">
+          <div class="num">03</div>
+          <h3>Let go</h3>
+          <p>Your words are typed where your cursor is, usually in about a second. What you had copied is put back on the clipboard.</p>
+          <div class="keys"><kbd>⌃</kbd><kbd>⌘</kbd><kbd>V</kbd> pastes the last one again</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <div class="reveal">
+        <div class="eyebrow">Features</div>
+        <h2>Small app. Big difference.</h2>
+        <p class="section-lede">Everything you need to write by voice, and nothing that gets in your way.</p>
+      </div>
+      <div class="features">
+        <div class="feature wide reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 21h10M9 9h6M9 13h4"/></svg></div>
+          <h3>Works in every app</h3>
+          <p>Flowtype types into the app you were using when you started talking: Mail, Slack, Notion, Chrome, VS Code, Terminal. If there's a text cursor, it works. It even adds a space when you continue a sentence.</p>
+        </div>
+        <div class="feature reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+          <h3>Private by default</h3>
+          <p>Speech is transcribed on your Mac with Whisper. Audio is never saved to disk and never leaves your computer.</p>
+        </div>
+        <div class="feature reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg></div>
+          <h3>Your dictionary</h3>
+          <p>Teach it names, product terms and acronyms. “Kubernetes”, “JSON” and your colleagues' names come out right every time.</p>
+        </div>
+        <div class="feature reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg></div>
+          <h3>Snippets</h3>
+          <p>Say “my calendar link” and get your booking URL. Addresses, sign-offs and canned replies, one phrase away.</p>
+        </div>
+        <div class="feature reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+          <h3>Careful with secrets</h3>
+          <p>Flowtype won't dictate into password fields, and it puts back whatever you had copied after it pastes.</p>
+        </div>
+        <div class="feature reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg></div>
+          <h3>See your progress</h3>
+          <p>Words dictated, speaking pace, time saved and your daily streak, plus a searchable history of everything you've said.</p>
+        </div>
+        <div class="feature wide reveal">
+          <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 1 0 6 16.9"/><path d="M12 13v8m-3-3 3 3 3-3"/></svg></div>
+          <h3>Pick your engine</h3>
+          <p>Choose on-device Whisper models from fast to most accurate, or use your own Groq API key for cloud transcription. Flowtype keeps itself up to date automatically.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="look">
+      <div class="reveal center">
+        <div class="eyebrow">Built for macOS</div>
+        <h2>Feels like it came with your Mac.</h2>
+        <p class="section-lede">A native Swift app with a Dock icon, a menu bar menu and a small bar at the bottom of your screen, and nothing else.</p>
+      </div>
+      <div class="showcase">
+        <div class="shot reveal">
+          <div class="titlebar"><i></i><i></i><i></i><span>Flowtype</span></div>
+          <img src="assets/screenshots/home-dark.png" alt="Flowtype Home screen with words dictated, speaking pace, time saved, a day streak, a chart of words per day and recent dictations" loading="lazy" width="1720" height="1512">
+        </div>
+        <div class="bars">
+          <figure class="reveal"><img src="assets/screenshots/bar-recording.png" alt="Dictation bar while recording, with a live waveform and timer" loading="lazy"><figcaption>Listening, with a live waveform</figcaption></figure>
+          <figure class="reveal"><img src="assets/screenshots/bar-pasted.png" alt="Dictation bar confirming 24 words were pasted" loading="lazy"><figcaption>Typed into your app</figcaption></figure>
+          <figure class="reveal"><img src="assets/screenshots/bar-idle.png" alt="Dictation bar at rest, showing the shortcut hint" loading="lazy"><figcaption>Out of the way until you need it</figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <div class="privacy reveal" id="privacy">
+      <div>
+        <div class="eyebrow">Privacy</div>
+        <h2>Your voice stays on your Mac.</h2>
+        <p class="section-lede">No accounts, no analytics, no tracking. Flowtype is a tool, not a service.</p>
+      </div>
+      <ul>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>On-device transcription</strong>Whisper runs locally. Audio is kept in memory only while you speak.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>History you control</strong>Keep it, delete it after 24 hours, or don't save transcripts at all.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg><span><strong>Cloud only if you ask</strong>Groq transcription is off unless you add your own key. <a href="https://github.com/yashgo0018/flowtype/blob/main/PRIVACY.md">Read the privacy policy</a>.</span></li>
+      </ul>
+    </div>
+
+    <section id="faq">
+      <div class="center reveal">
+        <div class="eyebrow">Questions</div>
+        <h2>Good to know</h2>
+      </div>
+      <div class="faq">
+        <details class="reveal">
+          <summary>Is Flowtype free?</summary>
+          <p>Yes. Download it from GitHub and use it as much as you like. On-device transcription is free and unlimited. Groq cloud transcription uses your own Groq account.</p>
+        </details>
+        <details class="reveal">
+          <summary>Which Macs does it run on?</summary>
+          <p>Macs with Apple silicon (M1 or later) running macOS 14 Sonoma or newer. The Small model, the default, runs well on any M-series Mac. Large v3 Turbo is more accurate and works best on newer chips.</p>
+        </details>
+        <details class="reveal">
+          <summary>Why does it need Accessibility permission?</summary>
+          <p>To type into other apps, Flowtype places the text on the clipboard and presses ⌘V for you, and it listens for your push-to-talk key. macOS requires Accessibility permission for both. Flowtype doesn't read or record what you type.</p>
+        </details>
+        <details class="reveal">
+          <summary>Holding Fn opens the emoji picker. What do I do?</summary>
+          <p>In <strong>System Settings → Keyboard</strong>, set <strong>“Press 🌐 key to”</strong> to <strong>Do Nothing</strong>. Or choose Right Option, Right Command or Right Control as your push-to-talk key in Flowtype's settings.</p>
+        </details>
+        <details class="reveal">
+          <summary>Which languages does it support?</summary>
+          <p>English for now. Dictation is tuned for English so Whisper never mistakes your speech for another language.</p>
+        </details>
+        <details class="reveal">
+          <summary>How do updates work?</summary>
+          <p>Flowtype checks for updates once a day and offers to install them. Every release is signed and notarized by Apple. You can also choose <strong>Check for Updates…</strong> from the menu.</p>
+        </details>
+      </div>
+    </section>
+
+    <div class="final reveal">
+      <img src="assets/icon.png" alt="Flowtype app icon">
+      <h2>Stop typing. Start talking.</h2>
+      <p class="section-lede" style="margin: 0 auto 34px">Download Flowtype free and write your next email out loud.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/yashgo0018/flowtype/releases/latest/download/Flowtype.dmg">Download for Mac</a>
+        <a class="btn btn-ghost" href="https://github.com/yashgo0018/flowtype/releases">All releases</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <span>© 2026 Infinitum Consulting LLC</span>
+      <span>
+        <a href="https://github.com/yashgo0018/flowtype">GitHub</a>
+        <a href="https://github.com/yashgo0018/flowtype/blob/main/PRIVACY.md">Privacy</a>
+        <a href="https://github.com/yashgo0018/flowtype/issues">Support</a>
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    // Nav border once scrolled
+    const nav = document.getElementById('nav');
+    addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 8), { passive: true });
+
+    // Reveal sections as they scroll into view
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) { entry.target.classList.add('in'); observer.unobserve(entry.target); }
+      }
+    }, { rootMargin: '0px 0px -8% 0px' });
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Demo: hold fn → listening → transcribing → text appears → pasted → repeat
+    const phrases = [
+      "Thanks for pulling this together. I went through the checklist and everything looks ready, so let's plan to ship on Thursday morning.",
+      "Quick update: the onboarding docs now cover the new Kubernetes setup, and I've flagged two JSON schema changes for review.",
+      "Can we move our sync to 3 PM tomorrow? I'd like to walk through the launch plan with the whole team."
+    ];
+    const bar = document.getElementById('bar');
+    const typed = document.getElementById('typed');
+    const timer = document.getElementById('timer');
+    const words = document.getElementById('words');
+    const fnKey = document.getElementById('fnkey');
+    const keyHint = document.getElementById('keyhint-text');
+    const wave = document.getElementById('wave');
+
+    for (let i = 0; i < 26; i++) {
+      const b = document.createElement('b');
+      b.style.setProperty('--h', (6 + Math.round(Math.abs(Math.sin(i * 1.7)) * 18)) + 'px');
+      b.style.animationDelay = (i * 0.06 % 0.9).toFixed(2) + 's';
+      wave.appendChild(b);
+    }
+
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    async function cycle(phrase) {
+      bar.dataset.state = 'idle';
+      typed.textContent = '';
+      await sleep(900);
+
+      fnKey.classList.add('down');
+      keyHint.textContent = 'listening…';
+      bar.dataset.state = 'recording';
+      const seconds = Math.max(3, Math.round(phrase.split(' ').length / 2.6));
+      for (let s = 0; s <= seconds; s++) {
+        timer.textContent = '0:' + String(s).padStart(2, '0');
+        await sleep(s === seconds ? 200 : 520);
+      }
+
+      fnKey.classList.remove('down');
+      keyHint.textContent = 'released';
+      bar.dataset.state = 'transcribing';
+      await sleep(850);
+
+      const span = document.createElement('span');
+      span.className = 'fresh';
+      span.textContent = phrase;
+      typed.appendChild(span);
+      words.textContent = phrase.split(/\s+/).length + ' words';
+      bar.dataset.state = 'pasted';
+      requestAnimationFrame(() => setTimeout(() => span.classList.add('settled'), 400));
+      await sleep(2200);
+
+      bar.dataset.state = 'idle';
+      keyHint.textContent = 'hold to talk';
+      await sleep(2600);
+    }
+
+    async function run() {
+      if (reduceMotion) {
+        typed.textContent = phrases[0];
+        bar.dataset.state = 'pasted';
+        return;
+      }
+      for (let i = 0; ; i = (i + 1) % phrases.length) {
+        await cycle(phrases[i]);
+      }
+    }
+    run();
+  </script>
+</body>
+</html>
