@@ -48,6 +48,7 @@ Each release:
 
 1. On `main`, bump `MARKETING_VERSION` in the project and commit. The build number comes from the git commit count.
 2. Run `scripts/release.sh`. It builds, notarizes the app and DMG, and writes `build/release/Flowtype-<version>.dmg` and `appcast.xml`. For now Apple takes about an hour per notarization for this team.
+   If it's interrupted (network drop, Mac asleep), run `scripts/release.sh --resume` to continue without rebuilding or resubmitting. While the Mac is locked the keychain is unavailable, so notarization checks pause until you unlock it.
 3. Install from the DMG and test it.
 4. Run `scripts/release.sh --publish`. It uploads exactly the files you tested, pushes `main` and the tag, and creates the GitHub release. It refuses if the code changed after the build.
 
