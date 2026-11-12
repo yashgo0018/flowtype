@@ -204,15 +204,7 @@ struct MeetingTranscriptRow: View {
                             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                                 .font(.caption).foregroundStyle(.tertiary)
                         }
-                        HStack(spacing: 6) {
-                            Text(session.startedAt.formatted(date: .omitted, time: .shortened))
-                            Text("·")
-                            Text(session.durationText)
-                            Text("·")
-                            Text("\(session.wordCount.formatted()) words")
-                            Text("·")
-                            Text(session.status).foregroundStyle(session.issues.isEmpty ? Color.secondary : Color.orange).lineLimit(1)
-                        }.font(.caption).foregroundStyle(.secondary)
+                        MeetingTranscriptMetadata(session: session)
                     }
                     .contentShape(Rectangle())
                 }
@@ -277,6 +269,21 @@ struct MeetingTranscriptRow: View {
             Button("Delete meeting…", role: .destructive, action: delete).disabled(isBusy)
             if session.retainsAudio { Button("Delete retained audio…", role: .destructive, action: deleteAudio).disabled(isBusy) }
         }
+    }
+}
+
+private struct MeetingTranscriptMetadata: View {
+    let session: MeetingSession
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(session.startedAt.formatted(date: .omitted, time: .shortened))
+            Text("·")
+            Text(session.durationText)
+            Text("·")
+            Text("\(session.wordCount.formatted()) words")
+            Text("·")
+            Text(session.status).foregroundStyle(session.issues.isEmpty ? Color.secondary : Color.orange).lineLimit(1)
+        }.font(.caption).foregroundStyle(.secondary)
     }
 }
 

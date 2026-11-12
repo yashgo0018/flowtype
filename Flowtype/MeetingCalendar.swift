@@ -170,7 +170,7 @@ final class MeetingCalendarScheduler: ObservableObject {
                     meetings.onAnnounce?()
                 } else {
                     meetings.start(microphoneUID: microphoneUID(), automatic: true)
-                    if meetings.isBusy { meetings.scheduledID = event.id; meetings.scheduledEnd = preferences.stopAtEventEnd ? event.end : nil }
+                    attachCapture(to: event)
                     message = meetings.isBusy ? "Scheduled capture announced. Stop or skip from Meetings." : meetings.message
                 }
             }
@@ -184,7 +184,7 @@ final class MeetingCalendarScheduler: ObservableObject {
         guard let event = suggestion else { return }
         suggestion = nil
         meetings.start(microphoneUID: microphoneUID())
-        if meetings.isBusy { meetings.scheduledID = event.id; meetings.scheduledEnd = meetings.preferences.stopAtEventEnd ? event.end : nil }
+        attachCapture(to: event)
     }
     func skip() { suggestion = nil; message = "Calendar suggestion skipped." }
 
@@ -196,10 +196,13 @@ final class MeetingCalendarScheduler: ObservableObject {
         suggestion = nil
         if let event { claim(event) }
         meetings.start(microphoneUID: microphoneUID())
-        if meetings.isBusy, let event {
-            meetings.scheduledID = event.id
-            meetings.scheduledStart = event.start
-            meetings.scheduledEnd = meetings.preferences.stopAtEventEnd ? event.end : nil
-        }
+        if let event { attachCapture(to: event, allowsEarlyStart: true) }
+    }
+
+    private func attachCapture(to event: MeetingEvent, allowsEarlyStart: Bool = false) {
+        guard meetings.isBusy else { return }
+        meetings.scheduledID = event.id
+        meetings.scheduledStart = allowsEarlyStart ? event.start : nil
+        meetings.scheduledEnd = meetings.preferences.stopAtEventEnd ? event.end : nil
     }
 }
