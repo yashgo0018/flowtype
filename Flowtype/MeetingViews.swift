@@ -4,66 +4,279 @@ struct MeetingsView: View {
     @EnvironmentObject private var controller: AppStateController
     @ObservedObject var meetings: MeetingController
     @ObservedObject var calendar: MeetingCalendarScheduler
-    @State private var selection: UUID?
+    @State private var search = ""
     @State private var deletion: MeetingSession?
+    @State private var deletingAudio = false
+
+    init(meetings: MeetingController, calendar: MeetingCalendarScheduler, search: String = "") {
+        self.meetings = meetings
+        self.calendar = calendar
+        _search = State(initialValue: search)
+    }
+
+    private var filtered: [MeetingSession] { meetings.sessions.filter { $0.matches(search) } }
+    private var sections: [(day: Date, sessions: [MeetingSession])] {
+        let grouped = Dictionary(grouping: filtered) { Calendar.current.startOfDay(for: $0.startedAt) }
+        return grouped.keys.sorted(by: >).map { ($0, (grouped[$0] ?? []).sorted { $0.startedAt > $1.startedAt }) }
+    }
+
+    var body: some View {
+        PageScrollView {
+            PageHeader(title: "Meetings", subtitle: "Your meeting transcripts, stored only on this Mac.") {
+                MeetingRecordButton(meetings: meetings, calendar: calendar)
+            }
+            if meetings.isBusy {
+                ActiveMeetingCard(meetings: meetings)
+            } else if let event = calendar.controlEvent {
+                CalendarMeetingCard(event: event, meetings: meetings, calendar: calendar)
+            }
+            if !meetings.isBusy && hasActionableNotice {
+                Label(meetings.message, systemImage: "exclamationmark.circle")
+                    .font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
+            SearchField(text: $search, prompt: "Search all meeting transcripts")
+                .accessibilityLabel("Search all meeting transcripts")
+            if filtered.isEmpty {
+                Card {
+                    EmptyStateView(systemImage: search.isEmpty ? "person.2.wave.2" : "magnifyingglass",
+                        title: search.isEmpty ? "No meetings yet" : "No matches",
+                        message: search.isEmpty ? "Start a meeting to transcribe your microphone and audio from all apps." : "Try another word or phrase from a transcript.")
+                }
+            } else {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(sections, id: \.day) { section in
+                        Text(dayTitle(section.day)).font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary).padding(.top, 8)
+                        ForEach(section.sessions) { session in
+                            MeetingTranscriptRow(session: session, query: search, isBusy: meetings.isBusy,
+                                export: { meetings.export(session) },
+                                copy: { controller.copyToClipboard(session.transcriptText) },
+                                delete: { deletingAudio = false; deletion = session },
+                                deleteAudio: { deletingAudio = true; deletion = session })
+                        }
+                    }
+                }
+            }
+            Text("Records your microphone and audio from all apps. Get participants’ permission before recording. Use headphones to reduce echo.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .alert(deletingAudio ? "Delete retained audio?" : "Delete meeting and any retained audio?",
+               isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } })) {
+            Button("Delete", role: .destructive) {
+                if let deletion {
+                    if deletingAudio { meetings.deleteAudio(deletion) } else { meetings.delete(deletion) }
+                }
+                deletion = nil
+            }
+            Button("Cancel", role: .cancel) { deletion = nil }
+        } message: {
+            Text(deletingAudio ? "The transcript will remain available." : "This permanently removes the transcript and any saved source audio from this Mac.")
+        }
+    }
+
+    private var hasActionableNotice: Bool {
+        ["Meeting did not start", "Could not", "Storage failed", "Meeting retention", "Finish dictation"].contains { meetings.message.hasPrefix($0) }
+    }
+    private func dayTitle(_ day: Date) -> String {
+        if Calendar.current.isDateInToday(day) { return "Today" }
+        if Calendar.current.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.wide).month(.wide).day())
+    }
+}
+
+/// One start/stop action across Home, Meetings and the floating bar.
+struct MeetingRecordButton: View {
+    @EnvironmentObject private var controller: AppStateController
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var calendar: MeetingCalendarScheduler
+    var idleTitle = "Start meeting"
+
+    var body: some View {
+        Button {
+            controller.toggleMeetingFromControl()
+        } label: {
+            Label(title, systemImage: meetings.isBusy ? "stop.fill" : "person.2.wave.2")
+        }
+        .disabled(meetings.phase == .finalizing || (!meetings.isBusy && !meetings.canStart()))
+        .help(meetings.isBusy ? "Stop meeting capture and finish the transcript" : "Transcribe your microphone and audio from all apps locally")
+        .accessibilityIdentifier("meeting-record-control")
+    }
+    private var title: String {
+        switch meetings.phase {
+        case .idle: idleTitle
+        case .preparing: "Cancel start"
+        case .recording: "Stop meeting"
+        case .finalizing: "Finishing…"
+        }
+    }
+}
+
+struct ActiveMeetingCard: View {
+    @ObservedObject var meetings: MeetingController
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    if meetings.phase == .recording {
+                        Circle().fill(.red).frame(width: 8, height: 8).accessibilityHidden(true)
+                        Text("Recording meeting").font(.headline)
+                        Spacer()
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            Text(MeetingSession.timestamp(meetings.elapsed)).monospacedDigit()
+                        }
+                    } else {
+                        ProgressView().controlSize(.small)
+                        Text(meetings.phase == .preparing ? "Preparing your meeting…" : "Finishing your transcript…").font(.headline)
+                    }
+                }
+                Text(meetings.message).font(.callout).foregroundStyle(.secondary)
+                if let session = meetings.current {
+                    Text("\(session.wordCount.formatted()) words transcribed · Microphone + system audio")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if meetings.phase == .finalizing {
+                    Button("Cancel remaining transcription") { meetings.cancelPendingTranscription() }
+                        .font(.callout)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+struct CalendarMeetingCard: View {
+    let event: MeetingEvent
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var calendar: MeetingCalendarScheduler
+    var body: some View {
+        Card {
+            HStack(spacing: 12) {
+                Image(systemName: "calendar").font(.title2).foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    TimelineView(.periodic(from: .now, by: 15)) { context in
+                        Text(event.start <= context.date ? "A calendar meeting is in progress" : "A calendar meeting starts at \(event.start.formatted(date: .omitted, time: .shortened))")
+                            .font(.headline)
+                    }
+                    Text("Start recording when you’re ready. Calendar time does not establish consent.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if calendar.suggestion != nil { Button("Skip") { calendar.skip() } }
+            }
+        }
+    }
+}
+
+struct MeetingTranscriptRow: View {
+    let session: MeetingSession
+    let query: String
+    let isBusy: Bool
+    let export: () -> Void
+    let copy: () -> Void
+    let delete: () -> Void
+    let deleteAudio: () -> Void
+    @State private var expanded = false
+    @State private var hovering = false
+    @FocusState private var focusedAction: Action?
+    private enum Action: Hashable { case copy, export, delete }
+
+    init(session: MeetingSession, query: String, isBusy: Bool, export: @escaping () -> Void,
+         copy: @escaping () -> Void, delete: @escaping () -> Void, deleteAudio: @escaping () -> Void,
+         initiallyExpanded: Bool = false) {
+        self.session = session; self.query = query; self.isBusy = isBusy
+        self.export = export; self.copy = copy; self.delete = delete; self.deleteAudio = deleteAudio
+        _expanded = State(initialValue: initiallyExpanded)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label(meetings.isBusy ? "Meeting capture active" : "Meetings", systemImage: meetings.isBusy ? "record.circle.fill" : "person.2.wave.2")
-                    .font(.title2.bold()).foregroundStyle(meetings.isBusy ? .red : .primary)
-                Spacer()
-                Button(meetings.isBusy ? "Stop meeting" : "Start meeting") {
-                    meetings.toggle(microphoneUID: controller.settings.microphoneUID)
-                }.disabled(meetings.phase == .finalizing)
-                if meetings.phase == .preparing || meetings.phase == .finalizing { ProgressView().controlSize(.small) }
-                if meetings.phase == .finalizing {
-                    Button("Cancel remaining transcription") { meetings.cancelPendingTranscription() }
-                }
-            }
-            Text(meetings.message).font(.callout).textSelection(.enabled).accessibilityAddTraits(.updatesFrequently)
-            Text("Captures your microphone and audio from all apps. Use headphones to reduce echo. Labels show sources, not participant identities. A transcript is not a playable recording. Get permission from participants before recording.")
-                .font(.caption).foregroundStyle(.secondary)
-            if let session = meetings.current, meetings.isBusy {
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text("\(MeetingSession.timestamp(meetings.elapsed)) · \(session.segments.count) transcript segments saved so far")
-                        .monospacedDigit().font(.caption)
-                }
-            }
-            if calendar.suggestion != nil {
-                HStack {
-                    Text("Calendar meeting due")
-                    Button("Start") { calendar.accept() }
-                    Button("Skip") { calendar.skip() }
-                }.padding().background(.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 8))
-            }
-            Divider()
-            HSplitView {
-                List(meetings.sessions, selection: $selection) { session in
-                    VStack(alignment: .leading) {
-                        Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
-                        Text(session.status).font(.caption).foregroundStyle(.secondary)
-                    }.tag(session.id)
-                }.frame(minWidth: 180, idealWidth: 220, maxWidth: 280)
-                if let session = meetings.sessions.first(where: { $0.id == selection }) ?? meetings.current ?? meetings.sessions.first {
-                    VStack(alignment: .leading) {
-                        HStack {
-                            Button("Export transcript…") { meetings.export(session) }
-                            if session.retainsAudio { Button("Delete audio", role: .destructive) { meetings.deleteAudio(session) } }
-                            Button("Delete…", role: .destructive) { deletion = session }
-                        }.disabled(meetings.isBusy)
-                        ScrollView {
-                            Text(session.markdown).font(.body.monospaced()).textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            HStack(alignment: .top, spacing: 12) {
+                Button { withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() } } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            if expanded {
+                                Text("Meeting at \(session.startedAt.formatted(date: .omitted, time: .shortened))").font(.headline)
+                            } else {
+                                Text(session.preview(matching: query).isEmpty ? "No speech transcript" : session.preview(matching: query))
+                                    .lineLimit(3).multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(.caption).foregroundStyle(.tertiary)
                         }
-                    }.frame(minWidth: 320)
-                } else { Text("Your local meeting transcripts appear here.").foregroundStyle(.secondary).frame(maxWidth: .infinity) }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .alert("Delete meeting and any retained audio?", isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } })) {
-                Button("Delete", role: .destructive) { if let deletion { meetings.delete(deletion) }; deletion = nil }
-                Button("Cancel", role: .cancel) { deletion = nil }
+                        HStack(spacing: 6) {
+                            Text(session.startedAt.formatted(date: .omitted, time: .shortened))
+                            Text("·")
+                            Text(session.durationText)
+                            Text("·")
+                            Text("\(session.wordCount.formatted()) words")
+                            Text("·")
+                            Text(session.status).foregroundStyle(session.issues.isEmpty ? Color.secondary : Color.orange).lineLimit(1)
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(expanded ? "Collapse" : "Open") meeting transcript, \(session.startedAt.formatted(date: .abbreviated, time: .shortened)), \(session.durationText), \(session.wordCount) words, \(session.status)")
+                HStack(spacing: 6) {
+                    Button(action: copy) { Image(systemName: "doc.on.doc") }
+                        .focused($focusedAction, equals: .copy).help("Copy transcript").accessibilityLabel("Copy meeting transcript")
+                    Button(action: export) { Image(systemName: "square.and.arrow.up") }
+                        .focused($focusedAction, equals: .export).help("Export transcript…").accessibilityLabel("Export meeting transcript")
+                    Button(role: .destructive, action: delete) { Image(systemName: "trash") }
+                        .focused($focusedAction, equals: .delete).help("Delete meeting…").accessibilityLabel("Delete meeting")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isBusy)
+                .opacity(hovering || focusedAction != nil ? 1 : 0)
             }
+            if expanded {
+                Divider()
+                if session.segments.isEmpty {
+                    Text("No speech was transcribed. Review the capture notices below.")
+                        .foregroundStyle(.secondary).font(.callout)
+                }
+                ForEach(session.orderedSegments) { segment in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
+                            Text(segment.source.title).font(.caption.weight(.semibold))
+                                .foregroundStyle(segment.source == .microphone ? Color.accentColor : Color.secondary)
+                            Text("\(MeetingSession.timestamp(segment.start))–\(MeetingSession.timestamp(segment.end))")
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                        Text(segment.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 3)
+                }
+                if !session.issues.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Capture notices", systemImage: "exclamationmark.circle").font(.callout.weight(.medium))
+                        ForEach(Array(session.issues.enumerated()), id: \.offset) { _, issue in
+                            Text("\(MeetingSession.timestamp(issue.start)) · \(issue.message)")
+                                .font(.callout).textSelection(.enabled)
+                        }
+                    }.foregroundStyle(.secondary).padding(.top, 4)
+                }
+                HStack {
+                    Text("\(session.engine) · \(session.locale)").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if !session.savesTranscript { Text("Not saved · export before quitting").font(.caption).foregroundStyle(.orange) }
+                    if session.retainsAudio { Button("Delete retained audio…", role: .destructive, action: deleteAudio).font(.caption).disabled(isBusy) }
+                }
+                Text("Source labels show microphone or all-app system audio, not participant identities. Timestamps are estimates. A transcript is not a playable recording.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.07)))
+        .onHover { hovering = $0 }
+        .contextMenu {
+            Button("Copy transcript", action: copy)
+            Button("Export transcript…", action: export).disabled(isBusy)
+            Button("Delete meeting…", role: .destructive, action: delete).disabled(isBusy)
+            if session.retainsAudio { Button("Delete retained audio…", role: .destructive, action: deleteAudio).disabled(isBusy) }
+        }
     }
 }
 

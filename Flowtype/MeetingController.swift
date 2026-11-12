@@ -90,6 +90,7 @@ final class MeetingController: ObservableObject {
     private var preparedPreferences: MeetingPreferences?
     var scheduledID: String?
     var scheduledEnd: Date?
+    var scheduledStart: Date?
 
     init(capture: MeetingCapturing = MeetingCapture(), transcriber: MeetingTranscribing = LocalMeetingTranscriber(),
          store: MeetingStoring? = nil, defaults: UserDefaults = .standard,
@@ -107,7 +108,9 @@ final class MeetingController: ObservableObject {
             if store == nil { store = try MeetingFileStore() }
             storeFailed = false
             var recovered = try store?.load() ?? []
+            var recoveredNow = false
             for index in recovered.indices where recovered[index].endedAt == nil {
+                recoveredNow = true
                 recovered[index].endedAt = recovered[index].startedAt.addingTimeInterval(recovered[index].duration)
                 recovered[index].status = "Interrupted — recovered partial transcript"
                 recovered[index].issues.append(MeetingIssue(start: recovered[index].duration, end: recovered[index].duration,
@@ -116,7 +119,7 @@ final class MeetingController: ObservableObject {
             }
             try store?.applyRetention(now: now(), excluding: nil)
             sessions = try store?.load() ?? []
-            if recovered.contains(where: { $0.status.hasPrefix("Interrupted") }) { message = "Recovered interrupted meetings. Review their capture notices for missing audio." }
+            if recoveredNow { message = "Recovered interrupted meetings. Review their capture notices for missing audio." }
         } catch { storeFailed = true; message = "Could not open meeting storage. Existing files were preserved. \(error.localizedDescription)" }
     }
 
@@ -135,7 +138,7 @@ final class MeetingController: ObservableObject {
             message = "Scheduled capture skipped. First complete a manual source check with these settings in this app launch."; return
         }
         if !automatic { verifiedSources = false }
-        current = nil; queue = nil; scheduledID = nil; scheduledEnd = nil
+        current = nil; queue = nil; scheduledID = nil; scheduledEnd = nil; scheduledStart = nil
         origin = uptime()
         activePreferences = preferences
         activePreferences.maximumMinutes = min(480, max(1, activePreferences.maximumMinutes))
@@ -301,7 +304,7 @@ final class MeetingController: ObservableObject {
         persistCurrent()
         if let current { sessions.removeAll { $0.id == current.id }; sessions.insert(current, at: 0) }
         transcriber.releaseModel()
-        queue = nil; worker = nil; scheduledID = nil; scheduledEnd = nil
+        queue = nil; worker = nil; scheduledID = nil; scheduledEnd = nil; scheduledStart = nil
         phase = .idle
         message = storeFailed ? "Storage failed. Export this transcript before quitting." : (current?.status ?? "Stopped")
         onPhaseChange?()

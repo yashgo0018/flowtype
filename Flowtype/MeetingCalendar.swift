@@ -64,6 +64,7 @@ final class MeetingCalendarScheduler: ObservableObject {
     @Published private(set) var choices: [MeetingCalendarChoice] = []
     @Published private(set) var suggestion: MeetingEvent?
     @Published private(set) var nearbyEvent: MeetingEvent?
+    var controlEvent: MeetingEvent? { suggestion ?? nearbyEvent }
     @Published private(set) var message = "Calendar integration is off."
     private let events: MeetingEventProviding
     private let now: () -> Date
@@ -96,7 +97,7 @@ final class MeetingCalendarScheduler: ObservableObject {
     func setMode(_ mode: MeetingCalendarMode) {
         guard !configuring else { return }
         if mode == .off {
-            meetings.preferences.calendarMode = .off; suggestion = nil; choices = []; message = "Calendar integration is off."; return
+            meetings.preferences.calendarMode = .off; suggestion = nil; nearbyEvent = nil; choices = []; message = "Calendar integration is off."; return
         }
         configuring = true
         Task {
@@ -127,9 +128,9 @@ final class MeetingCalendarScheduler: ObservableObject {
 
     func tick() {
         let preferences = meetings.preferences
-        guard preferences.calendarMode != .off else { suggestion = nil; return }
+        guard preferences.calendarMode != .off else { suggestion = nil; nearbyEvent = nil; return }
         guard events.authorized else {
-            suggestion = nil; choices = []
+            suggestion = nil; nearbyEvent = nil; choices = []
             if meetings.scheduledID != nil { meetings.stop(reason: "Calendar permission was revoked; scheduled capture stopped.") }
             message = "Calendar permission is unavailable. Scheduled capture is paused."
             return
@@ -140,8 +141,16 @@ final class MeetingCalendarScheduler: ObservableObject {
         choices = events.calendars()
         do {
             let snapshot = try events.events(from: time.addingTimeInterval(-12 * 3600), to: time.addingTimeInterval(24 * 3600), calendarIDs: preferences.calendarIDs)
+            // Passive context is independent of suggestion deduplication; it never starts capture.
+            nearbyEvent = snapshot.filter {
+                Self.eligible($0, preferences: preferences) && $0.end > time && $0.start <= time.addingTimeInterval(10 * 60)
+            }.sorted {
+                if ($0.start <= time) != ($1.start <= time) { return $0.start <= time }
+                return $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start
+            }.first
             if let activeID = meetings.scheduledID, preferences.stopAtEventEnd {
-                if let active = snapshot.first(where: { $0.id == activeID && Self.eligible($0, preferences: preferences) }), active.start <= time, active.end > time {
+                if let active = snapshot.first(where: { $0.id == activeID && Self.eligible($0, preferences: preferences) }),
+                   (active.start <= time || active.start == meetings.scheduledStart), active.end > time {
                     meetings.scheduledEnd = active.end
                 } else { meetings.stop(reason: "Scheduled event ended, moved, was cancelled, or is no longer eligible.") }
             }
@@ -166,7 +175,7 @@ final class MeetingCalendarScheduler: ObservableObject {
                 }
             }
             if preferences.calendarIDs.isEmpty { message = "Select calendars. No events are eligible yet." }
-        } catch { suggestion = nil; message = error.localizedDescription }
+        } catch { suggestion = nil; nearbyEvent = nil; message = error.localizedDescription }
     }
 
     func accept() {
@@ -179,5 +188,18 @@ final class MeetingCalendarScheduler: ObservableObject {
     }
     func skip() { suggestion = nil; message = "Calendar suggestion skipped." }
 
-    func startFromControl() {}
+    func startFromControl() {
+        guard !meetings.isBusy else { return }
+        tick()
+        guard !meetings.isBusy else { return }
+        let event = controlEvent
+        suggestion = nil
+        if let event { claim(event) }
+        meetings.start(microphoneUID: microphoneUID())
+        if meetings.isBusy, let event {
+            meetings.scheduledID = event.id
+            meetings.scheduledStart = event.start
+            meetings.scheduledEnd = meetings.preferences.stopAtEventEnd ? event.end : nil
+        }
+    }
 }

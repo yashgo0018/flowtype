@@ -26,7 +26,7 @@ final class FlowBarPanelController {
 
     init(controller: AppStateController) {
         self.controller = controller
-        let rootView = FlowBarView()
+        let rootView = FlowBarView(meetings: controller.meetings, calendar: controller.meetingCalendar)
             .environmentObject(controller)
             .environmentObject(controller.levelMeter)
             .environmentObject(model)
@@ -57,6 +57,14 @@ final class FlowBarPanelController {
             .receive(on: RunLoop.main)
             .sink { [weak self] phase, settings, activity, hovering in
                 self?.update(phase: phase, settings: settings, activity: activity, hovering: hovering)
+            }
+            .store(in: &cancellables)
+
+        Publishers.CombineLatest3(controller.meetings.$phase, controller.meetingCalendar.$nearbyEvent, controller.meetingCalendar.$suggestion)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _, _ in
+                guard let self else { return }
+                self.update(phase: controller.phase, settings: controller.settings, activity: controller.modelActivity, hovering: self.model.isHovering)
             }
             .store(in: &cancellables)
 
@@ -123,19 +131,21 @@ final class FlowBarPanelController {
     }
 
     private func update(phase: DictationPhase, settings: AppSettings, activity: ModelActivity?, hovering: Bool) {
-        let isIdle = phase == .idle
-        if isIdle && !settings.showFlowBarWhenIdle {
+        let meetingPhase = controller.meetings.phase
+        if !FlowBarLayout.isVisible(phase: phase, settings: settings, meetingPhase: meetingPhase) {
             model.isHovering = false
             panel.orderOut(nil)
             return
         }
         // Follow the user to the screen they're working on when a dictation starts.
-        if currentScreen == nil || (phase.isRecording && !wasRecording) {
+        let isRecording = phase.isRecording || meetingPhase == .recording
+        if currentScreen == nil || (isRecording && !wasRecording) {
             currentScreen = screenUnderMouse()
         }
-        wasRecording = phase.isRecording
+        wasRecording = isRecording
 
-        let size = FlowBarLayout.size(phase: phase, activity: activity, hovering: hovering, settings: settings)
+        let size = FlowBarLayout.size(phase: phase, activity: activity, hovering: hovering, settings: settings,
+                                      meetingPhase: meetingPhase, hasCalendarMeeting: controller.meetingCalendar.controlEvent != nil)
         // SwiftUI animates the pill; the panel itself never animates. It grows immediately and shrinks
         // only after the pill has finished shrinking, so the pill never moves under the pointer.
         model.pillSize = size
@@ -188,8 +198,10 @@ final class FlowBarPanelController {
 enum FlowBarLayout {
     static func size(phase: DictationPhase, activity: ModelActivity?, hovering: Bool, settings: AppSettings,
                      meetingPhase: MeetingPhase = .idle, hasCalendarMeeting: Bool = false) -> CGSize {
+        if meetingPhase != .idle { return CGSize(width: 320, height: 40) }
         switch phase {
         case .idle:
+            if hasCalendarMeeting { return CGSize(width: 360, height: 40) }
             return hovering ? CGSize(width: idleHintWidth(settings: settings), height: 36) : CGSize(width: 44, height: 10)
         case .recording:
             return CGSize(width: 232, height: 40)
@@ -204,12 +216,12 @@ enum FlowBarLayout {
     }
 
     static func isVisible(phase: DictationPhase, settings: AppSettings, meetingPhase: MeetingPhase = .idle) -> Bool {
-        phase != .idle || settings.showFlowBarWhenIdle
+        meetingPhase != .idle || phase != .idle || settings.showFlowBarWhenIdle
     }
 
     static func idleHintWidth(settings: AppSettings) -> CGFloat {
-        // Text plus the mic and open buttons on either side.
-        min(400, textWidth(FlowBarView.idleHint(settings: settings), weight: .medium, size: 12) + 104)
+        // Dictation hint, meeting action, and mic/open controls.
+        min(540, textWidth(FlowBarView.idleHint(settings: settings), weight: .medium, size: 12) + 210)
     }
 
     private static func textWidth(_ text: String, weight: NSFont.Weight, size: CGFloat) -> CGFloat {
@@ -264,6 +276,8 @@ final class FlowBarHostingView<Content: View>: NSHostingView<Content> {
 struct FlowBarView: View {
     @EnvironmentObject private var controller: AppStateController
     @EnvironmentObject private var model: FlowBarModel
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var calendar: MeetingCalendarScheduler
 
     var body: some View {
         ZStack {
@@ -291,6 +305,9 @@ struct FlowBarView: View {
         .contextMenu {
             Button("Open Flowtype") { controller.showHub(.home) }
             Button("History") { controller.showHub(.history) }
+            Button("Meetings") { controller.showHub(.meetings) }
+            Button(meetings.isBusy ? "Stop meeting" : "Record meeting") { controller.toggleMeetingFromControl() }
+                .disabled(meetings.phase == .finalizing || (!meetings.isBusy && !meetings.canStart()))
             Button("Settings…") { controller.showHub(.settings) }
             Divider()
             Button("Quit Flowtype") { NSApp.terminate(nil) }
@@ -306,11 +323,13 @@ struct FlowBarView: View {
     }
 
     private var isCollapsed: Bool {
-        controller.phase == .idle && !model.isHovering
+        controller.phase == .idle && meetings.phase == .idle && calendar.controlEvent == nil && !model.isHovering
     }
 
     private var stateKey: String {
-        switch controller.phase {
+        if meetings.isBusy { return "meeting-\(meetings.phase.rawValue)" }
+        if controller.phase == .idle, let event = calendar.controlEvent { return "calendar-\(event.id)" }
+        return switch controller.phase {
         case .idle: model.isHovering ? "hover" : "idle"
         case .recording: "recording"
         case .transcribing: "transcribing"
@@ -319,7 +338,8 @@ struct FlowBarView: View {
     }
 
     private var borderColor: Color {
-        switch controller.phase {
+        if meetings.isBusy { return Color.red.opacity(0.55) }
+        return switch controller.phase {
         case .recording: Color.red.opacity(0.55)
         case .finished(let feedback) where feedback.kind == .error: Color.red.opacity(0.4)
         default: Color.white.opacity(model.isHovering ? 0.28 : 0.18)
@@ -328,9 +348,14 @@ struct FlowBarView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch controller.phase {
+        if meetings.isBusy {
+            MeetingBarRecordingView(meetings: meetings)
+        } else {
+          switch controller.phase {
         case .idle:
-            if model.isHovering {
+            if let event = calendar.controlEvent {
+                CalendarBarHintView(event: event, meetings: meetings, calendar: calendar)
+            } else if model.isHovering {
                 IdleHintView()
             }
         case .recording(let mode, let startedAt):
@@ -339,6 +364,7 @@ struct FlowBarView: View {
             TranscribingView(activity: controller.modelActivity)
         case .finished(let feedback):
             FeedbackView(feedback: feedback)
+          }
         }
     }
 
@@ -376,11 +402,76 @@ private struct IdleHintView: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
+            Rectangle().fill(.white.opacity(0.18)).frame(width: 1, height: 18)
+            Button { controller.toggleMeetingFromControl() } label: {
+                Label("Meeting", systemImage: "person.2.wave.2")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .background(.white.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!controller.meetings.canStart())
+            .help("Record a meeting with microphone and audio from all apps")
+            .accessibilityLabel("Record meeting")
             FlowBarIconButton(systemImage: "slider.horizontal.3", tint: .white.opacity(0.85), background: .white.opacity(0.12), help: "Open Flowtype") {
                 controller.showHub()
             }
         }
         .padding(.horizontal, 2)
+    }
+}
+
+private struct CalendarBarHintView: View {
+    @EnvironmentObject private var controller: AppStateController
+    let event: MeetingEvent
+    @ObservedObject var meetings: MeetingController
+    @ObservedObject var calendar: MeetingCalendarScheduler
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "calendar").foregroundStyle(.white.opacity(0.8))
+            TimelineView(.periodic(from: .now, by: 15)) { context in
+                let minutes = max(1, Int(ceil(event.start.timeIntervalSince(context.date) / 60)))
+                Text(event.start <= context.date ? "Meeting in progress" : "Meeting in \(minutes) min")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            MeetingRecordButton(meetings: meetings, calendar: calendar, idleTitle: "Record meeting")
+                .font(.system(size: 12, weight: .semibold)).buttonStyle(.plain).foregroundStyle(.white)
+            FlowBarIconButton(systemImage: "slider.horizontal.3", tint: .white.opacity(0.85), background: .white.opacity(0.12), help: "Open Meetings") {
+                controller.showHub(.meetings)
+            }
+        }.padding(.horizontal, 5)
+    }
+}
+
+private struct MeetingBarRecordingView: View {
+    @EnvironmentObject private var controller: AppStateController
+    @ObservedObject var meetings: MeetingController
+    var body: some View {
+        HStack(spacing: 10) {
+            if meetings.phase == .recording {
+                Circle().fill(.red).frame(width: 8, height: 8)
+                Text("Meeting").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                Spacer(minLength: 0)
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text(MeetingSession.timestamp(meetings.elapsed))
+                        .font(.system(size: 12).monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                }
+            } else {
+                ProgressView().controlSize(.small).tint(.white)
+                Text(meetings.phase == .preparing ? "Preparing meeting…" : "Finishing transcript…")
+                    .font(.system(size: 12, weight: .medium)).foregroundStyle(.white)
+                Spacer(minLength: 0)
+            }
+            if meetings.phase != .finalizing {
+                FlowBarIconButton(systemImage: meetings.phase == .recording ? "stop.fill" : "xmark", tint: .white, background: .red, help: "Stop meeting") {
+                    meetings.stop()
+                }
+            }
+            FlowBarIconButton(systemImage: "slider.horizontal.3", tint: .white.opacity(0.85), background: .white.opacity(0.12), help: "Open meeting transcript") {
+                controller.showHub(.meetings)
+            }
+        }.padding(.horizontal, 5)
     }
 }
 

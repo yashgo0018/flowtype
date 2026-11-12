@@ -116,10 +116,14 @@ struct HomeView: View {
 
     var body: some View {
         PageScrollView(spacing: 24) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(greeting)
-                    .font(.system(size: 30, weight: .bold))
-                HowToDictateView()
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(greeting).font(.system(size: 30, weight: .bold))
+                    HowToDictateView()
+                }
+                Spacer(minLength: 0)
+                MeetingRecordButton(meetings: controller.meetings, calendar: controller.meetingCalendar)
+                    .controlSize(.large)
             }
 
             if showsSetup {

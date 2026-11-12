@@ -43,13 +43,27 @@ struct MeetingSession: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
-    // Presentation contracts; behavior is added after the red test checkpoint.
-    var transcriptText: String { "" }
-    var wordCount: Int { 0 }
-    var recordingMinutes: Double { 0 }
-    var durationText: String { "0 min" }
-    func matches(_ query: String) -> Bool { false }
-    func preview(matching query: String) -> String { "" }
+    var transcriptText: String { orderedSegments.map(\.text).joined(separator: " ") }
+    var wordCount: Int { TextMetrics.wordCount(transcriptText) }
+    var recordingMinutes: Double { duration.isFinite ? max(0, duration) / 60 : 0 }
+    var durationText: String {
+        if recordingMinutes == 0 { return "0 min" }
+        if recordingMinutes < 1 { return "<1 min" }
+        return "\(recordingMinutes.formatted(.number.precision(.fractionLength(0...1)))) min"
+    }
+    func matches(_ query: String) -> Bool {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty || transcriptText.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+    func preview(matching query: String) -> String {
+        let text = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let match = query.isEmpty ? nil : text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive])
+        let anchor = match?.lowerBound ?? text.startIndex
+        let start = text.index(anchor, offsetBy: -60, limitedBy: text.startIndex) ?? text.startIndex
+        let end = text.index(start, offsetBy: 200, limitedBy: text.endIndex) ?? text.endIndex
+        return (start > text.startIndex ? "…" : "") + text[start..<end] + (end < text.endIndex ? "…" : "")
+    }
 
     var markdown: String {
         var lines = ["# Meeting transcript", "", "Started: \(startedAt.ISO8601Format())", "Status: \(status)",

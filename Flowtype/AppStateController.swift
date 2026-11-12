@@ -328,6 +328,14 @@ final class AppStateController: ObservableObject {
     // MARK: - Recording
 
     /// Flow Bar button: start, or stop when already recording.
+    func toggleMeetingFromControl() {
+        if meetings.isBusy { meetings.stop() }
+        else {
+            showHub(.meetings)
+            meetingCalendar.startFromControl()
+        }
+    }
+
     func toggleFromFlowBar() {
         switch phase {
         case .recording: stopRecording()
