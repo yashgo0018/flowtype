@@ -32,6 +32,14 @@
 		100000000000000000000123 /* ScreenshotGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000306 /* ScreenshotGenerator.swift */; };
 		100000000000000000000132 /* AppleSpeechTranscription.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000232 /* AppleSpeechTranscription.swift */; };
 		100000000000000000000124 /* AppleSpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000307 /* AppleSpeechTests.swift */; };
+		200000000000000000000100 /* MeetingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000200 /* MeetingModels.swift */; };
+		200000000000000000000101 /* MeetingAudioQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000201 /* MeetingAudioQueue.swift */; };
+		200000000000000000000102 /* MeetingCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000202 /* MeetingCapture.swift */; };
+		200000000000000000000103 /* MeetingController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000203 /* MeetingController.swift */; };
+		200000000000000000000104 /* MeetingCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000204 /* MeetingCalendar.swift */; };
+		200000000000000000000105 /* MeetingViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000205 /* MeetingViews.swift */; };
+		200000000000000000000106 /* MeetingIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000206 /* MeetingIntents.swift */; };
+		200000000000000000000107 /* MeetingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000207 /* MeetingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +80,14 @@
 		100000000000000000000306 /* ScreenshotGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotGenerator.swift; sourceTree = "<group>"; };
 		100000000000000000000232 /* AppleSpeechTranscription.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechTranscription.swift; sourceTree = "<group>"; };
 		100000000000000000000307 /* AppleSpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSpeechTests.swift; sourceTree = "<group>"; };
+		200000000000000000000200 /* MeetingModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingModels.swift; sourceTree = "<group>"; };
+		200000000000000000000201 /* MeetingAudioQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAudioQueue.swift; sourceTree = "<group>"; };
+		200000000000000000000202 /* MeetingCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCapture.swift; sourceTree = "<group>"; };
+		200000000000000000000203 /* MeetingController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingController.swift; sourceTree = "<group>"; };
+		200000000000000000000204 /* MeetingCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCalendar.swift; sourceTree = "<group>"; };
+		200000000000000000000205 /* MeetingViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingViews.swift; sourceTree = "<group>"; };
+		200000000000000000000206 /* MeetingIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingIntents.swift; sourceTree = "<group>"; };
+		200000000000000000000207 /* MeetingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -106,6 +122,13 @@
 		100000000000000000000010 /* Flowtype */ = {
 			isa = PBXGroup;
 			children = (
+				200000000000000000000206 /* MeetingIntents.swift */,
+				200000000000000000000205 /* MeetingViews.swift */,
+				200000000000000000000204 /* MeetingCalendar.swift */,
+				200000000000000000000203 /* MeetingController.swift */,
+				200000000000000000000202 /* MeetingCapture.swift */,
+				200000000000000000000201 /* MeetingAudioQueue.swift */,
+				200000000000000000000200 /* MeetingModels.swift */,
 				100000000000000000000201 /* FlowtypeApp.swift */,
 				100000000000000000000202 /* AppSettings.swift */,
 				100000000000000000000203 /* Shortcut.swift */,
@@ -132,6 +155,7 @@
 		100000000000000000000011 /* FlowtypeTests */ = {
 			isa = PBXGroup;
 			children = (
+				200000000000000000000207 /* MeetingTests.swift */,
 				100000000000000000000301 /* ShortcutTests.swift */,
 				100000000000000000000302 /* SettingsStoreTests.swift */,
 				100000000000000000000303 /* TextProcessingTests.swift */,
@@ -258,6 +282,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				200000000000000000000106 /* MeetingIntents.swift in Sources */,
+				200000000000000000000105 /* MeetingViews.swift in Sources */,
+				200000000000000000000104 /* MeetingCalendar.swift in Sources */,
+				200000000000000000000103 /* MeetingController.swift in Sources */,
+				200000000000000000000102 /* MeetingCapture.swift in Sources */,
+				200000000000000000000101 /* MeetingAudioQueue.swift in Sources */,
+				200000000000000000000100 /* MeetingModels.swift in Sources */,
 				100000000000000000000101 /* FlowtypeApp.swift in Sources */,
 				100000000000000000000102 /* AppSettings.swift in Sources */,
 				100000000000000000000103 /* Shortcut.swift in Sources */,
@@ -281,6 +312,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				200000000000000000000107 /* MeetingTests.swift in Sources */,
 				100000000000000000000110 /* ShortcutTests.swift in Sources */,
 				100000000000000000000111 /* SettingsStoreTests.swift in Sources */,
 				100000000000000000000120 /* TextProcessingTests.swift in Sources */,

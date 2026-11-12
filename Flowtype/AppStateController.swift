@@ -55,6 +55,7 @@ enum ModelActivity: Equatable {
 enum HubPage: String, CaseIterable, Identifiable, Hashable {
     case home
     case history
+    case meetings
     case dictionary
     case snippets
     case notes
@@ -66,6 +67,7 @@ enum HubPage: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: "Home"
         case .history: "History"
+        case .meetings: "Meetings"
         case .dictionary: "Dictionary"
         case .snippets: "Snippets"
         case .notes: "Notes"
@@ -77,6 +79,7 @@ enum HubPage: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .home: "house"
         case .history: "clock.arrow.circlepath"
+        case .meetings: "person.2.wave.2"
         case .dictionary: "character.book.closed"
         case .snippets: "text.badge.plus"
         case .notes: "note.text"
@@ -119,6 +122,8 @@ final class AppStateController: ObservableObject {
     @Published private(set) var lastTranscript: String?
     @Published var hubPage: HubPage = .home
 
+    let meetings: MeetingController
+    lazy var meetingCalendar = MeetingCalendarScheduler(meetings: meetings, microphoneUID: { [weak self] in self?.settings.microphoneUID ?? "" })
     let levelMeter = AudioLevelMeter()
     /// Asks the app to show the Hub window.
     var onShowHub: (() -> Void)?
@@ -150,6 +155,7 @@ final class AppStateController: ObservableObject {
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
+        meetings: MeetingController = MeetingController(),
         audio: AudioCapturing = AudioRecorder(),
         transcriber: Transcribing = DefaultTranscriptionService(),
         pasteService: Pasting = PasteService(),
@@ -158,6 +164,7 @@ final class AppStateController: ObservableObject {
         permissions: @escaping @MainActor () -> PermissionStatus = { PermissionStatus.current() }
     ) {
         let loadedSettings = settingsStore.load()
+        self.meetings = meetings
         self.settingsStore = settingsStore
         self.settings = loadedSettings
         self.audio = audio
@@ -168,6 +175,10 @@ final class AppStateController: ObservableObject {
         self.currentPermissions = permissions
         self.permissions = permissions()
         self.modelStatus = transcriber.modelStatus(settings: loadedSettings)
+        meetings.canStart = { [weak self] in
+            guard let self else { return false }
+            return !self.phase.isBusy && self.preparations.isEmpty
+        }
     }
 
     /// Something must be fixed before dictation can paste: a permission or a missing API key.
@@ -180,6 +191,8 @@ final class AppStateController: ObservableObject {
     // MARK: - Lifecycle
 
     func start(localStore: LocalStore) {
+        meetings.openStore()
+        meetingCalendar.start()
         self.localStore = localStore
         lastTranscript = localStore.latestTranscript()
         try? localStore.applyRetention(settings.retentionPolicy)
@@ -236,6 +249,7 @@ final class AppStateController: ObservableObject {
 
     /// Runs every minute: enforces history retention and frees the model when idle.
     func performHousekeeping(now: Date = .now) {
+        meetings.housekeeping()
         try? localStore?.applyRetention(settings.retentionPolicy)
         if !phase.isBusy,
            preparations.isEmpty,
@@ -247,6 +261,9 @@ final class AppStateController: ObservableObject {
     }
 
     private func wireHotKeys() {
+        hotKeys.onMeetingToggle = { [weak self] in
+            guard let self else { return }; self.meetings.toggle(microphoneUID: self.settings.microphoneUID)
+        }
         hotKeys.onTogglePressed = { [weak self] in self?.handleTogglePressed() }
         hotKeys.onToggleReleased = { [weak self] in self?.handleToggleReleased() }
         hotKeys.onHoldDown = { [weak self] in self?.handleHoldDown() }
@@ -321,7 +338,7 @@ final class AppStateController: ObservableObject {
 
     @discardableResult
     func startRecording(mode: RecordingMode) -> Bool {
-        guard !phase.isBusy else { return false }
+        guard !phase.isBusy, !meetings.isBusy else { return false }
         refreshPermissions()
 
         switch permissions.microphone {
@@ -640,7 +657,8 @@ final class AppStateController: ObservableObject {
         let conflicts = ShortcutParser.conflicts(next.shortcutBindings)
         guard conflicts.isEmpty else { return conflicts.joined(separator: "\n") }
 
-        let shortcutsChanged = next.toggleShortcut != settings.toggleShortcut
+        let shortcutsChanged = next.meetingShortcut != settings.meetingShortcut
+            || next.toggleShortcut != settings.toggleShortcut
             || next.pasteLastShortcut != settings.pasteLastShortcut
             || next.holdKey != settings.holdKey
         if shortcutsChanged {
@@ -658,6 +676,7 @@ final class AppStateController: ObservableObject {
         let retentionChanged = next.retentionPolicy != settings.retentionPolicy
 
         let previous = settings
+        if previous.microphoneUID != next.microphoneUID { meetings.invalidateSourceCheck() }
         settings = next
         settingsStore.save(next)
 
@@ -710,7 +729,7 @@ final class AppStateController: ObservableObject {
 
     /// Downloads (if needed) and loads the selected on-device model.
     func prepareModel() {
-        guard usesOnDeviceModel else { return }
+        guard usesOnDeviceModel, !meetings.isBusy else { return }
         let target = settings
         let key = modelKey(for: target)
         guard preparations[key] == nil else { return }
@@ -739,6 +758,7 @@ final class AppStateController: ObservableObject {
     }
 
     func deleteDownloadedModels() {
+        guard !meetings.isBusy else { return }
         do {
             try transcriber.deleteDownloadedModels()
         } catch {

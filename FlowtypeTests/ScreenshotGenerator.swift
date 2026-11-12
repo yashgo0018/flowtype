@@ -13,7 +13,7 @@ import XCTest
 final class ScreenshotGenerator: XCTestCase {
     private var outputDirectory: URL!
 
-    override func setUpWithError() throws {
+    override func setUp() async throws {
         guard let path = ProcessInfo.processInfo.environment["FLOWTYPE_SCREENSHOTS_DIR"] else {
             throw XCTSkip("Set TEST_RUNNER_FLOWTYPE_SCREENSHOTS_DIR to generate screenshots.")
         }
@@ -64,6 +64,26 @@ final class ScreenshotGenerator: XCTestCase {
             let margin = FlowBarPanelController.margin * 2
             try renderInWindow(bar, size: NSSize(width: model.pillSize.width + margin, height: model.pillSize.height + margin), name: name)
         }
+    }
+
+    func testRenderMeetingsAndSettings() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("MeetingScreenshot-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try MeetingFileStore(root: root)
+        var session = MeetingSession(startedAt: .now.addingTimeInterval(-1800), endedAt: .now, duration: 1800,
+                                     status: "Completed", engine: "Apple Speech (on device)", locale: "en-US")
+        session.segments = [MeetingSegment(source: .microphone, start: 4, end: 8, text: "Let's review the checklist for Thursday."),
+                            MeetingSegment(source: .system, start: 8, end: 12, text: "The team has finished reviewing the launch plan.")]
+        try store.save(session)
+        let defaults = UserDefaults(suiteName: "MeetingScreenshot-\(UUID())")!
+        let meetings = MeetingController(store: store, defaults: defaults)
+        meetings.openStore()
+        let settings = SettingsStore(defaults: defaults, apiKeyStore: UserDefaultsGroqAPIKeyStore(defaults: defaults))
+        let controller = AppStateController(settingsStore: settings, meetings: meetings, transcriber: ReadyTranscriber(),
+            permissions: { PermissionStatus(microphone: .authorized, accessibility: true) })
+        try renderInWindow(MeetingsView(meetings: meetings, calendar: controller.meetingCalendar).environmentObject(controller).environment(\.colorScheme, .light).background(Color.white),
+                           size: NSSize(width: 980, height: 680), name: "meetings")
+        try renderInWindow(SettingsView().environmentObject(controller).environment(\.colorScheme, .light).background(Color.white), size: NSSize(width: 980, height: 900), name: "meeting-settings")
     }
 
     // MARK: - Sample data

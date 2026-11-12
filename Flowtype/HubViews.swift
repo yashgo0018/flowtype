@@ -16,7 +16,7 @@ struct HubRootView: View {
         NavigationSplitView {
             List(selection: selection) {
                 Section {
-                    ForEach([HubPage.home, .history]) { page in
+                    ForEach([HubPage.home, .history, .meetings]) { page in
                         Label(page.title, systemImage: page.systemImage).tag(page)
                     }
                 }
@@ -40,6 +40,7 @@ struct HubRootView: View {
                 switch controller.hubPage {
                 case .home: HomeView()
                 case .history: HistoryView()
+                case .meetings: MeetingsView(meetings: controller.meetings, calendar: controller.meetingCalendar)
                 case .dictionary: DictionaryView()
                 case .snippets: SnippetsView()
                 case .notes: NotesView()

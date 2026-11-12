@@ -197,6 +197,7 @@ struct AppSettings: Equatable, Sendable {
     var playSounds: Bool
     var restoreClipboardAfterPaste: Bool
     var retentionPolicy: RetentionPolicy
+    var meetingShortcut = "cmd+ctrl+m"
 
     static var defaults: AppSettings {
         AppSettings(
@@ -226,6 +227,7 @@ struct AppSettings: Equatable, Sendable {
         if !pasteLastShortcut.isEmpty {
             bindings["Paste last transcript"] = pasteLastShortcut
         }
+        if !meetingShortcut.isEmpty { bindings["Meeting capture"] = meetingShortcut }
         return bindings
     }
 }
@@ -266,7 +268,7 @@ final class SettingsStore {
         let toggle = defaults.string(forKey: Key.toggleShortcut).flatMap(Self.validShortcut) ?? fallback.toggleShortcut
         let pasteLast = defaults.string(forKey: Key.pasteLastShortcut).map { $0.isEmpty ? "" : (Self.validShortcut($0) ?? fallback.pasteLastShortcut) }
             ?? fallback.pasteLastShortcut
-        return AppSettings(
+        var value = AppSettings(
             toggleShortcut: toggle,
             holdKey: defaults.string(forKey: Key.holdShortcut).map(HoldKey.init(storedValue:)) ?? fallback.holdKey,
             pasteLastShortcut: pasteLast == toggle ? "" : pasteLast,
@@ -281,9 +283,13 @@ final class SettingsStore {
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
             retentionPolicy: RetentionPolicy(rawValue: defaults.string(forKey: Key.retentionPolicy) ?? "") ?? fallback.retentionPolicy
         )
+        value.meetingShortcut = defaults.string(forKey: "meeting.shortcut").map { $0.isEmpty ? "" : (Self.validShortcut($0) ?? "") } ?? value.meetingShortcut
+        if !ShortcutParser.conflicts(value.shortcutBindings).isEmpty { value.meetingShortcut = "" }
+        return value
     }
 
     func save(_ settings: AppSettings) {
+        defaults.set(settings.meetingShortcut, forKey: "meeting.shortcut")
         defaults.set(settings.toggleShortcut, forKey: Key.toggleShortcut)
         defaults.set(settings.holdKey.rawValue, forKey: Key.holdShortcut)
         defaults.set(settings.pasteLastShortcut, forKey: Key.pasteLastShortcut)
