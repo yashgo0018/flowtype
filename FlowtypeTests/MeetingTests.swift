@@ -5,6 +5,73 @@ import SwiftUI
 import XCTest
 @testable import Flowtype
 
+final class MeetingPresentationTests: XCTestCase {
+    func testStatsCountTranscriptWordsAndSessionMinutesWithoutDoubleCountingSources() {
+        var session = MeetingSession(startedAt: .now, duration: 150, engine: "Test", locale: "en-US")
+        session.segments = [MeetingSegment(source: .microphone, start: 0, end: 150, text: "Hello, one two."),
+                            MeetingSegment(source: .system, start: 0, end: 150, text: "Remote reply.")]
+        session.issues = [MeetingIssue(start: 0, end: 1, message: "These notice words must not count")]
+        XCTAssertEqual(session.wordCount, 5)
+        XCTAssertEqual(session.recordingMinutes, 2.5, accuracy: 0.001)
+    }
+
+    func testEmptyTranscriptsAndInvalidDurationsHaveSafeStats() {
+        var session = MeetingSession(startedAt: .now, engine: "Test", locale: "en-US")
+        XCTAssertEqual(session.wordCount, 0)
+        XCTAssertEqual(session.durationText, "0 min")
+        for duration in [-1.0, Double.nan, Double.infinity] {
+            session.duration = duration
+            XCTAssertEqual(session.recordingMinutes, 0)
+        }
+        session.duration = 20
+        XCTAssertEqual(session.durationText, "<1 min")
+    }
+
+    func testSearchFindsContentAcrossAllSegmentsAndSourcesWithCaseAndAccentFolding() {
+        var session = MeetingSession(startedAt: .now, engine: "Test", locale: "en-US")
+        session.segments = [MeetingSegment(source: .microphone, start: 0, end: 1, text: "Opening remarks"),
+                            MeetingSegment(source: .system, start: 90, end: 91, text: "Résumé planning next"),
+                            MeetingSegment(source: .microphone, start: 92, end: 93, text: "steps tomorrow")]
+        XCTAssertTrue(session.matches("  RESUME\n"))
+        XCTAssertTrue(session.matches("next steps"))
+        XCTAssertTrue(session.matches(" \n "))
+        XCTAssertFalse(session.matches("absent phrase"))
+    }
+
+    func testSearchPreviewRevealsALateMatchAndPlainTextUsesTimelineOrder() {
+        var session = MeetingSession(startedAt: .now, engine: "Test", locale: "en-US")
+        session.segments = [MeetingSegment(source: .system, start: 90, end: 100, text: "Find the launch checklist here."),
+                            MeetingSegment(source: .microphone, start: 0, end: 89, text: String(repeating: "Opening words. ", count: 80))]
+        XCTAssertTrue(session.transcriptText.hasPrefix("Opening words."))
+        XCTAssertTrue(session.preview(matching: "checklist").contains("checklist"))
+        XCTAssertLessThan(session.preview(matching: "checklist").count, 250)
+        XCTAssertFalse(session.transcriptText.contains("**System audio:**"))
+    }
+}
+
+@MainActor
+final class MeetingBarPresentationTests: XCTestCase {
+    func testActiveMeetingAndCalendarContextHaveRoomForAReadableActionWithoutHover() {
+        for phase in [MeetingPhase.preparing, .recording, .finalizing] {
+            let size = FlowBarLayout.size(phase: .idle, activity: nil, hovering: false, settings: .defaults, meetingPhase: phase)
+            XCTAssertGreaterThanOrEqual(size.width, 260)
+            XCTAssertGreaterThanOrEqual(size.height, 36)
+        }
+        let context = FlowBarLayout.size(phase: .idle, activity: nil, hovering: false, settings: .defaults, hasCalendarMeeting: true)
+        XCTAssertGreaterThanOrEqual(context.width, 260)
+        XCTAssertGreaterThanOrEqual(context.height, 36)
+    }
+
+    func testRecordingRemainsVisibleWhenIdleBarIsDisabled() {
+        var settings = AppSettings.defaults
+        settings.showFlowBarWhenIdle = false
+        XCTAssertFalse(FlowBarLayout.isVisible(phase: .idle, settings: settings))
+        for phase in [MeetingPhase.preparing, .recording, .finalizing] {
+            XCTAssertTrue(FlowBarLayout.isVisible(phase: .idle, settings: settings, meetingPhase: phase))
+        }
+    }
+}
+
 final class MeetingQueueTests: XCTestCase {
     func testBoundedForLongMeetingAndReportsDroppedIntervals() {
         let queue = MeetingAudioQueue()
@@ -171,6 +238,18 @@ private struct SystemCallbackInvocation: @unchecked Sendable {
 
 @MainActor
 final class MeetingControllerTests: XCTestCase {
+    func testOldInterruptedSessionDoesNotShowAFreshRecoveryNoticeOnEveryLaunch() {
+        let store = TestMeetingStore()
+        let session = MeetingSession(startedAt: .now.addingTimeInterval(-60), endedAt: .now,
+                                     status: "Interrupted — recovered partial transcript", engine: "Test", locale: "en-US")
+        store.saved[session.id] = session
+        let controller = MeetingController(capture: TestMeetingCapture(), transcriber: TestMeetingTranscriber(), store: store,
+            defaults: UserDefaults(suiteName: "RecoveryNotice-\(UUID())")!)
+        controller.openStore()
+        XCTAssertFalse(controller.message.contains("Recovered interrupted meetings"))
+        XCTAssertEqual(controller.sessions.first?.status, session.status)
+    }
+
     private func setup() -> (MeetingController, TestMeetingCapture, TestMeetingTranscriber, TestMeetingStore, UserDefaults) {
         let defaults = UserDefaults(suiteName: "MeetingTests-\(UUID().uuidString)")!
         let capture = TestMeetingCapture(), transcriber = TestMeetingTranscriber(), store = TestMeetingStore()
@@ -439,6 +518,87 @@ final class MeetingPersistenceTests: XCTestCase {
 
 @MainActor
 final class MeetingCalendarTests: XCTestCase {
+    func testBarContextPrefersOngoingMeetingAndUpdatesForMoveCancellationAndEnd() {
+        let time = Date(timeIntervalSince1970: 1_000_000)
+        let defaults = UserDefaults(suiteName: "CalendarBar-\(UUID())")!
+        let meeting = MeetingController(capture: TestMeetingCapture(), transcriber: TestMeetingTranscriber(), store: TestMeetingStore(), defaults: defaults)
+        meeting.preferences.calendarMode = .suggest; meeting.preferences.calendarIDs = ["chosen"]
+        let provider = TestMeetingEvents()
+        let ongoing = MeetingEvent(id: "ongoing", calendarID: "chosen", start: time.addingTimeInterval(-300), end: time.addingTimeInterval(300), hasConference: true)
+        let soon = MeetingEvent(id: "soon", calendarID: "chosen", start: time.addingTimeInterval(480), end: time.addingTimeInterval(900), hasConference: true)
+        provider.snapshot = [soon, ongoing]
+        let scheduler = MeetingCalendarScheduler(meetings: meeting, events: provider, defaults: defaults, now: { time })
+        scheduler.tick(); XCTAssertEqual(scheduler.nearbyEvent?.id, "ongoing")
+        provider.snapshot[1].cancelled = true
+        scheduler.tick(); XCTAssertEqual(scheduler.nearbyEvent?.id, "soon")
+        provider.snapshot[0].start = time.addingTimeInterval(3600)
+        scheduler.tick(); XCTAssertNil(scheduler.nearbyEvent)
+        provider.snapshot = [ongoing]; provider.snapshot[0].end = time.addingTimeInterval(-1)
+        scheduler.tick(); XCTAssertNil(scheduler.nearbyEvent)
+        XCTAssertFalse(meeting.isBusy)
+    }
+
+    func testBarContextNeverReadsCalendarWhenOffAndClearsOnRevocation() {
+        let defaults = UserDefaults(suiteName: "CalendarBarOff-\(UUID())")!
+        let meeting = MeetingController(capture: TestMeetingCapture(), transcriber: TestMeetingTranscriber(), store: TestMeetingStore(), defaults: defaults)
+        let provider = TestMeetingEvents()
+        let time = Date()
+        provider.snapshot = [MeetingEvent(id: "one", calendarID: "chosen", start: time, end: time.addingTimeInterval(300), hasConference: true)]
+        let scheduler = MeetingCalendarScheduler(meetings: meeting, events: provider, defaults: defaults, now: { time })
+        scheduler.tick(); XCTAssertEqual(provider.reads, 0)
+        meeting.preferences.calendarMode = .suggest; meeting.preferences.calendarIDs = ["chosen"]
+        scheduler.tick(); XCTAssertNotNil(scheduler.nearbyEvent)
+        provider.authorized = false; scheduler.tick(); XCTAssertNil(scheduler.nearbyEvent)
+        provider.authorized = true; scheduler.tick(); XCTAssertNotNil(scheduler.nearbyEvent)
+        scheduler.setMode(.off); XCTAssertNil(scheduler.nearbyEvent)
+    }
+
+    func testExplicitControlStartsOngoingMeetingAndAttachesItsEndTime() async throws {
+        let defaults = UserDefaults(suiteName: "CalendarControl-\(UUID())")!
+        let capture = TestMeetingCapture()
+        let meeting = MeetingController(capture: capture, transcriber: TestMeetingTranscriber(), store: TestMeetingStore(), defaults: defaults, microphoneAuthorized: { true })
+        meeting.preferences.calendarMode = .suggest; meeting.preferences.calendarIDs = ["chosen"]
+        let provider = TestMeetingEvents()
+        let time = Date()
+        let event = MeetingEvent(id: "ongoing", calendarID: "chosen", start: time.addingTimeInterval(-120), end: time.addingTimeInterval(300), hasConference: true)
+        provider.snapshot = [event]
+        let scheduler = MeetingCalendarScheduler(meetings: meeting, events: provider, defaults: defaults, now: { time })
+        scheduler.tick(); XCTAssertFalse(meeting.isBusy)
+        scheduler.startFromControl()
+        for _ in 0..<100 where meeting.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(capture.starts, 1)
+        XCTAssertEqual(meeting.scheduledID, event.id)
+        XCTAssertEqual(meeting.scheduledEnd, event.end)
+        meeting.stop()
+        for _ in 0..<100 where meeting.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+
+        provider.snapshot[0].start = time.addingTimeInterval(300)
+        provider.snapshot[0].end = time.addingTimeInterval(900)
+        scheduler.startFromControl()
+        for _ in 0..<100 where meeting.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        scheduler.tick()
+        XCTAssertEqual(meeting.phase, .recording, "An explicit early start must not stop before the event begins.")
+        provider.snapshot[0].start = time.addingTimeInterval(3600)
+        provider.snapshot[0].end = time.addingTimeInterval(3900)
+        scheduler.tick()
+        for _ in 0..<100 where meeting.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(meeting.isBusy, "Moving the calendar event must stop its attached capture.")
+    }
+
+    func testControlWithoutCalendarStillStartsAnExplicitManualRecording() async throws {
+        let defaults = UserDefaults(suiteName: "ManualControl-\(UUID())")!
+        let capture = TestMeetingCapture()
+        let meeting = MeetingController(capture: capture, transcriber: TestMeetingTranscriber(), store: TestMeetingStore(), defaults: defaults, microphoneAuthorized: { true })
+        let provider = TestMeetingEvents()
+        let scheduler = MeetingCalendarScheduler(meetings: meeting, events: provider, defaults: defaults)
+        scheduler.startFromControl()
+        for _ in 0..<100 where meeting.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(capture.starts, 1); XCTAssertEqual(provider.reads, 0)
+        XCTAssertNil(meeting.scheduledID)
+        meeting.stop()
+        for _ in 0..<100 where meeting.isBusy { try await Task.sleep(for: .milliseconds(10)) }
+    }
+
     func testEligibilityRequiresSelectedCalendarsFiltersAndTimedEvents() {
         var preferences = MeetingPreferences(); preferences.calendarIDs = ["chosen"]
         var event = MeetingEvent(id: "one", calendarID: "chosen", start: .now, end: .now.addingTimeInterval(300), hasConference: true)

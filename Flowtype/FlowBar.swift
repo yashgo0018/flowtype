@@ -186,7 +186,8 @@ final class FlowBarPanelController {
 
 @MainActor
 enum FlowBarLayout {
-    static func size(phase: DictationPhase, activity: ModelActivity?, hovering: Bool, settings: AppSettings) -> CGSize {
+    static func size(phase: DictationPhase, activity: ModelActivity?, hovering: Bool, settings: AppSettings,
+                     meetingPhase: MeetingPhase = .idle, hasCalendarMeeting: Bool = false) -> CGSize {
         switch phase {
         case .idle:
             return hovering ? CGSize(width: idleHintWidth(settings: settings), height: 36) : CGSize(width: 44, height: 10)
@@ -200,6 +201,10 @@ enum FlowBarLayout {
             let width = min(380, max(150, max(titleWidth, detailWidth) + 64))
             return CGSize(width: width.rounded(.up), height: feedback.detail == nil ? 40 : 50)
         }
+    }
+
+    static func isVisible(phase: DictationPhase, settings: AppSettings, meetingPhase: MeetingPhase = .idle) -> Bool {
+        phase != .idle || settings.showFlowBarWhenIdle
     }
 
     static func idleHintWidth(settings: AppSettings) -> CGFloat {

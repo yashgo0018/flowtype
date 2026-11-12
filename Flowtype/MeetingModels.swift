@@ -43,6 +43,14 @@ struct MeetingSession: Codable, Identifiable, Equatable, Sendable {
         }
     }
 
+    // Presentation contracts; behavior is added after the red test checkpoint.
+    var transcriptText: String { "" }
+    var wordCount: Int { 0 }
+    var recordingMinutes: Double { 0 }
+    var durationText: String { "0 min" }
+    func matches(_ query: String) -> Bool { false }
+    func preview(matching query: String) -> String { "" }
+
     var markdown: String {
         var lines = ["# Meeting transcript", "", "Started: \(startedAt.ISO8601Format())", "Status: \(status)",
                      "Engine: \(engine) · Language: \(locale)",

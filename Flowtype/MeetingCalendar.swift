@@ -63,6 +63,7 @@ final class AppleMeetingEvents: MeetingEventProviding {
 final class MeetingCalendarScheduler: ObservableObject {
     @Published private(set) var choices: [MeetingCalendarChoice] = []
     @Published private(set) var suggestion: MeetingEvent?
+    @Published private(set) var nearbyEvent: MeetingEvent?
     @Published private(set) var message = "Calendar integration is off."
     private let events: MeetingEventProviding
     private let now: () -> Date
@@ -177,4 +178,6 @@ final class MeetingCalendarScheduler: ObservableObject {
         if meetings.isBusy { meetings.scheduledID = event.id; meetings.scheduledEnd = meetings.preferences.stopAtEventEnd ? event.end : nil }
     }
     func skip() { suggestion = nil; message = "Calendar suggestion skipped." }
+
+    func startFromControl() {}
 }
