@@ -103,6 +103,29 @@ final class WhisperKitTranscriptionService: Transcribing {
         return results.map(\.text).joined(separator: " ")
     }
 
+    static func supportsMeetingLanguage(_ locale: String) -> Bool {
+        guard let code = Locale(identifier: locale).language.languageCode?.identifier else { return false }
+        return Constants.languageCodes.contains(code)
+    }
+
+    /// Meeting-specific decoding never uses the dictation provider or its text replacement rules.
+    func transcribeMeeting(_ chunk: MeetingChunk, preferences: MeetingPreferences) async throws -> [MeetingSegment] {
+        let language = Locale(identifier: preferences.locale).language.languageCode?.identifier ?? ""
+        guard Constants.languageCodes.contains(language) else {
+            throw MeetingError.message("Whisper does not support this meeting language code.")
+        }
+        let kit = try await loadKit(modelName: preferences.whisperModel, progress: nil)
+        let options = DecodingOptions(task: .transcribe, language: language,
+            temperature: 0, usePrefillPrompt: true, detectLanguage: false, skipSpecialTokens: true,
+            withoutTimestamps: false, suppressBlank: true, chunkingStrategy: ChunkingStrategy.none)
+        let results = try await kit.transcribe(audioArray: chunk.samples, decodeOptions: options)
+        try Task.checkCancellation()
+        return results.flatMap(\.segments).map {
+            MeetingSegment(source: chunk.source, start: chunk.start + Double($0.start),
+                           end: chunk.start + Double($0.end), text: $0.text)
+        }
+    }
+
     func modelStatus(settings: AppSettings) -> TranscriptionModelStatus {
         let modelName = SettingsStore.normalizeTranscriptionModel(settings.transcriptionModel)
         let folder = localModelFolder(for: modelName)

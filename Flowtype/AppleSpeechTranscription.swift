@@ -144,6 +144,55 @@ final class AppleSpeechTranscriptionService: Transcribing {
         return try await collector.value
     }
 
+    @available(macOS 26, *)
+    nonisolated static func prepareMeeting(locale: String, allowDownload: Bool = true) async throws {
+        if !allowDownload {
+            let module = try await transcriber(for: Locale(identifier: locale))
+            guard await AssetInventory.status(forModules: [module]) == .installed else {
+                throw MeetingError.message("The Apple meeting language model is not installed. Prepare it with a manual capture first.")
+            }
+            return
+        }
+        try await installAssets(locale: Locale(identifier: locale), progress: nil)
+    }
+
+    @available(macOS 26, *)
+    nonisolated static func transcribeMeeting(_ chunk: MeetingChunk, locale: String) async throws -> [MeetingSegment] {
+        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: locale)) else {
+            throw MeetingError.message("Apple Speech does not support the selected meeting language on this Mac.")
+        }
+        // Final results only; one analyzer at a time, with no resource-limit override.
+        let module = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module]),
+              let buffer = convert(chunk.samples, to: format) else { throw AppleSpeechError.audioFormat }
+        let analyzer = SpeechAnalyzer(modules: [module])
+        let collector = Task {
+            var segments: [MeetingSegment] = []
+            for try await result in module.results {
+                segments.append(MeetingSegment(source: chunk.source,
+                    start: chunk.start + result.range.start.seconds,
+                    end: chunk.start + result.range.end.seconds, text: String(result.text.characters)))
+            }
+            return segments
+        }
+        let (input, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        continuation.yield(AnalyzerInput(buffer: buffer)); continuation.finish()
+        return try await withTaskCancellationHandler {
+            do {
+                _ = try await analyzer.analyzeSequence(input)
+                try await analyzer.finalizeAndFinishThroughEndOfInput()
+                return try await collector.value
+            } catch {
+                collector.cancel()
+                await analyzer.cancelAndFinishNow()
+                throw error
+            }
+        } onCancel: {
+            collector.cancel()
+            Task { await analyzer.cancelAndFinishNow() }
+        }
+    }
+
     /// Converts Flowtype's 16 kHz mono float samples into the analyzer's preferred format.
     nonisolated private static func convert(_ samples: [Float], to format: AVAudioFormat) -> AVAudioPCMBuffer? {
         guard !samples.isEmpty, let sourceFormat = AVAudioFormat(

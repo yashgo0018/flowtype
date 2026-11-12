@@ -118,3 +118,9 @@ Flowtype transcribes with Apple's [Speech](https://developer.apple.com/documenta
 ## License
 
 Flowtype is released under the [MIT License](LICENSE). © 2026 Infinitum Consulting LLC
+
+## Meeting transcription
+
+Capture microphone and all-app system audio locally on macOS 14.2+, with source labels, timestamps, transcript export and partial-session recovery. Open **Meetings** or use **Control–Command–M** (configurable). Meeting transcription never pastes into your active app and never uses Groq. Audio retention and Calendar suggestions/auto-start are separate opt-ins. Obtain participants’ permission before recording.
+
+Read [meeting setup, privacy, limitations and controls](docs/MEETINGS.md) and [validation status](docs/MEETINGS-VALIDATION.md). Command + Fn and a native Control Center widget are not currently supported. Shortcuts Start/Stop App Intents are included; signed-app discovery and Control Center execution still require manual verification.

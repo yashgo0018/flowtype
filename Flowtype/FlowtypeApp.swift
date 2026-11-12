@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         modelContainer = container
         controller.onShowHub = { [weak self] in self?.showHub() }
         controller.onCheckForUpdates = { [weak self] in self?.checkForUpdates() }
+        MeetingActions.controller = controller
+        controller.meetings.onAnnounce = { [weak self] in self?.controller.showHub(.meetings) }
         controller.start(localStore: LocalStore(context: container.mainContext))
 
         let flowBar = FlowBarPanelController(controller: controller)
@@ -104,6 +106,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 app.forceTerminate()
             }
         }
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard controller.meetings.isBusy else { return .terminateNow }
+        controller.meetings.stop(reason: "Flowtype quit. Pending transcription was finalized before exit.")
+        controller.meetings.$phase.filter { $0 == .idle }.first().receive(on: RunLoop.main)
+            .sink { _ in sender.reply(toApplicationShouldTerminate: true) }.store(in: &cancellables)
+        return .terminateLater
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -158,6 +168,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             .receive(on: RunLoop.main)
             .sink { [weak self] phase in self?.updateStatusIcon(phase: phase) }
             .store(in: &cancellables)
+        controller.meetings.$phase
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateStatusIcon(phase: self.controller.phase)
+            }.store(in: &cancellables)
         controller.$permissions
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
@@ -168,6 +184,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     private func updateStatusIcon(phase: DictationPhase) {
+        if controller.meetings.isBusy {
+            statusItem?.length = NSStatusItem.variableLength
+            statusItem?.button?.title = controller.meetings.phase == .recording ? " REC" : " Meeting…"
+            statusItem?.button?.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Meeting capture active — open to stop")
+            statusItem?.button?.setAccessibilityLabel("Flowtype meeting capture active. Open menu to stop.")
+            return
+        }
+        statusItem?.length = NSStatusItem.squareLength
+        statusItem?.button?.title = ""
+        statusItem?.button?.setAccessibilityLabel("Flowtype")
         let symbol: String
         switch phase {
         case .recording: symbol = "waveform.circle.fill"
@@ -193,9 +219,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let dictate = actionItem(isRecording ? "Stop Dictation" : "Start Dictation", image: isRecording ? "stop.circle" : "mic") { [weak self] in
             self?.controller.toggleFromFlowBar()
         }
-        dictate.isEnabled = controller.phase != .transcribing
+        dictate.isEnabled = controller.phase != .transcribing && !controller.meetings.isBusy
         applyShortcut(controller.settings.toggleShortcut, to: dictate)
         menu.addItem(dictate)
+
+        let meeting = actionItem(controller.meetings.isBusy ? "Stop Meeting Capture" : "Start Meeting Capture", image: "record.circle") { [weak self] in
+            guard let self else { return }; self.controller.meetings.toggle(microphoneUID: self.controller.settings.microphoneUID)
+        }
+        meeting.isEnabled = controller.meetings.phase != .finalizing && !controller.phase.isBusy
+        applyShortcut(controller.settings.meetingShortcut, to: meeting)
+        menu.addItem(meeting)
+        menu.addItem(actionItem("Meetings & Transcripts…", image: "person.2.wave.2") { [weak self] in self?.controller.showHub(.meetings) })
 
         let pasteLast = actionItem("Paste Last Transcript", image: "doc.on.clipboard") { [weak self] in
             self?.controller.pasteLastTranscript()

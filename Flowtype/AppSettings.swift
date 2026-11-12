@@ -197,6 +197,7 @@ struct AppSettings: Equatable, Sendable {
     var playSounds: Bool
     var restoreClipboardAfterPaste: Bool
     var retentionPolicy: RetentionPolicy
+    var meetingShortcut = "cmd+ctrl+m"
 
     static var defaults: AppSettings {
         AppSettings(
@@ -226,6 +227,7 @@ struct AppSettings: Equatable, Sendable {
         if !pasteLastShortcut.isEmpty {
             bindings["Paste last transcript"] = pasteLastShortcut
         }
+        if !meetingShortcut.isEmpty { bindings["Meeting capture"] = meetingShortcut }
         return bindings
     }
 }
@@ -235,6 +237,7 @@ final class SettingsStore {
         static let toggleShortcut = "shortcut.toggle"
         static let holdShortcut = "shortcut.hold"
         static let pasteLastShortcut = "shortcut.pasteLast"
+        static let meetingShortcut = "meeting.shortcut"
         static let transcriptionProvider = "transcription.provider"
         static let transcriptionModel = "transcription.model"
         static let microphoneUID = "audio.microphoneUID"
@@ -266,7 +269,7 @@ final class SettingsStore {
         let toggle = defaults.string(forKey: Key.toggleShortcut).flatMap(Self.validShortcut) ?? fallback.toggleShortcut
         let pasteLast = defaults.string(forKey: Key.pasteLastShortcut).map { $0.isEmpty ? "" : (Self.validShortcut($0) ?? fallback.pasteLastShortcut) }
             ?? fallback.pasteLastShortcut
-        return AppSettings(
+        var value = AppSettings(
             toggleShortcut: toggle,
             holdKey: defaults.string(forKey: Key.holdShortcut).map(HoldKey.init(storedValue:)) ?? fallback.holdKey,
             pasteLastShortcut: pasteLast == toggle ? "" : pasteLast,
@@ -281,9 +284,13 @@ final class SettingsStore {
             restoreClipboardAfterPaste: defaults.object(forKey: Key.restoreClipboardAfterPaste) as? Bool ?? fallback.restoreClipboardAfterPaste,
             retentionPolicy: RetentionPolicy(rawValue: defaults.string(forKey: Key.retentionPolicy) ?? "") ?? fallback.retentionPolicy
         )
+        value.meetingShortcut = loadMeetingShortcut(fallback: value.meetingShortcut)
+        if !ShortcutParser.conflicts(value.shortcutBindings).isEmpty { value.meetingShortcut = "" }
+        return value
     }
 
     func save(_ settings: AppSettings) {
+        defaults.set(settings.meetingShortcut, forKey: Key.meetingShortcut)
         defaults.set(settings.toggleShortcut, forKey: Key.toggleShortcut)
         defaults.set(settings.holdKey.rawValue, forKey: Key.holdShortcut)
         defaults.set(settings.pasteLastShortcut, forKey: Key.pasteLastShortcut)
@@ -314,6 +321,12 @@ final class SettingsStore {
 
     private static func validShortcut(_ shortcut: String) -> String? {
         (try? ShortcutParser.parse(shortcut)) == nil ? nil : ShortcutParser.canonical(shortcut)
+    }
+
+    private func loadMeetingShortcut(fallback: String) -> String {
+        // A missing preference uses the default; empty or invalid preferences disable the binding.
+        guard let stored = defaults.string(forKey: Key.meetingShortcut) else { return fallback }
+        return Self.validShortcut(stored) ?? ""
     }
 }
 

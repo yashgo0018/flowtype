@@ -40,6 +40,13 @@ struct SettingsView: View {
                     Text("Re-inserts your most recent dictation.")
                 }
 
+                LabeledContent("Meeting capture toggle") {
+                    ShortcutRecorder(shortcut: controller.settings.meetingShortcut, allowsClear: true) { value in
+                        apply { $0.meetingShortcut = value }
+                    }
+                }
+                Text("Command + Fn is not offered: reliable coexistence with bare Fn dictation has not been verified. Use a chord with a regular key, including on external keyboards.")
+                    .font(.caption).foregroundStyle(.secondary)
                 if let warning = controller.shortcutWarning {
                     Label(warning, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
@@ -84,6 +91,8 @@ struct SettingsView: View {
                     }
                 }
             }
+
+            MeetingSettingsView(meetings: controller.meetings, calendar: controller.meetingCalendar)
 
             Section("Appearance") {
                 Toggle(isOn: binding(\.showInDock)) {

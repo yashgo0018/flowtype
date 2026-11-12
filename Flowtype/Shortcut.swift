@@ -193,3 +193,14 @@ enum ShortcutParser {
         }
     }
 }
+
+/// Fires once on press; repeats and releases cannot toggle a meeting again.
+struct ShortcutPressLatch {
+    private(set) var isDown = false
+    mutating func update(pressed: Bool) -> Bool {
+        if !pressed { isDown = false; return false }
+        guard !isDown else { return false }
+        isDown = true
+        return true
+    }
+}

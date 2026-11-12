@@ -19,6 +19,23 @@ final class AppleSpeechTests: XCTestCase {
         XCTAssertTrue(service.isLoaded(settings: AppSettings.defaults))
     }
 
+    func testMeetingFinalRangesPreserveSourceAndSessionOffset() async throws {
+        guard #available(macOS 26, *) else { throw XCTSkip("Meeting Apple Speech requires macOS 26.") }
+        try XCTSkipUnless(AppleSpeech.isSupported, "Apple Speech is unavailable on this Mac.")
+        let audio = try spokenAudio("The meeting checklist is ready for Thursday morning.")
+        try await AppleSpeechTranscriptionService.prepareMeeting(locale: "en-US")
+        let chunk = MeetingChunk(source: .system, start: 12.5, samples: audio.samples)
+        let segments = try await AppleSpeechTranscriptionService.transcribeMeeting(chunk, locale: "en-US")
+        XCTAssertFalse(segments.isEmpty)
+        XCTAssertTrue(segments.map(\.text).joined(separator: " ").lowercased().contains("checklist"))
+        for segment in segments {
+            XCTAssertEqual(segment.source, .system)
+            XCTAssertGreaterThanOrEqual(segment.start, chunk.start)
+            XCTAssertLessThanOrEqual(segment.end, chunk.end + 0.1)
+            XCTAssertGreaterThanOrEqual(segment.end, segment.start)
+        }
+    }
+
     /// Synthesizes speech with macOS's `say` and converts it to Flowtype's 16 kHz mono recording format.
     private func spokenAudio(_ sentence: String) throws -> RecordedAudio {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("flowtype-apple-speech-\(UUID().uuidString).aiff")

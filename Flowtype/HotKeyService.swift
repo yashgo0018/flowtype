@@ -6,6 +6,7 @@ final class HotKeyService {
     var onTogglePressed: (() -> Void)?
     var onToggleReleased: (() -> Void)?
     var onPasteLast: (() -> Void)?
+    var onMeetingToggle: (() -> Void)?
     var onCancel: (() -> Void)?
     var onHoldDown: (() -> Void)?
     var onHoldUp: (() -> Void)?
@@ -16,6 +17,7 @@ final class HotKeyService {
         case toggle = 1
         case pasteLast = 2
         case cancel = 3
+        case meeting = 4
     }
 
     private var handlerRef: EventHandlerRef?
@@ -26,6 +28,8 @@ final class HotKeyService {
     private var toggleShortcut: ParsedShortcut?
     private var toggleShortcutName = ""
     private var pasteLastShortcut: ParsedShortcut?
+    private var meetingShortcut: ParsedShortcut?
+    private var meetingLatch = ShortcutPressLatch()
     private var holdKey: HoldKey = .off
     /// Set when Carbon couldn't register the toggle shortcut, so event monitors detect it instead.
     private var toggleNeedsMonitor = false
@@ -39,6 +43,9 @@ final class HotKeyService {
     func configure(settings: AppSettings) throws -> String? {
         let toggle = try ShortcutParser.parse(settings.toggleShortcut)
         let pasteLast = settings.pasteLastShortcut.isEmpty ? nil : try ShortcutParser.parse(settings.pasteLastShortcut)
+        let meeting = settings.meetingShortcut.isEmpty ? nil : try ShortcutParser.parse(settings.meetingShortcut)
+        meetingShortcut = meeting
+        meetingLatch = ShortcutPressLatch()
         toggleShortcut = toggle
         toggleShortcutName = settings.toggleShortcut
         pasteLastShortcut = pasteLast
@@ -70,6 +77,7 @@ final class HotKeyService {
             unregister(id)
         }
         holdActive = false
+        meetingLatch = ShortcutPressLatch()
     }
 
     func resume() {
@@ -103,6 +111,9 @@ final class HotKeyService {
         }
         if let pasteLastShortcut, !register(pasteLastShortcut, id: .pasteLast) {
             warnings.append("The paste-last shortcut is already used by another app.")
+        }
+        if let meetingShortcut, !register(meetingShortcut, id: .meeting) {
+            warnings.append("The meeting shortcut is already used by another app. Choose a different chord in Settings.")
         }
         if cancelEnabled {
             _ = register(ParsedShortcut(keyCode: UInt16(kVK_Escape), modifiers: []), id: .cancel)
@@ -186,6 +197,8 @@ final class HotKeyService {
             if pressed { onPasteLast?() }
         case .cancel:
             if pressed { onCancel?() }
+        case .meeting:
+            if meetingLatch.update(pressed: pressed) { onMeetingToggle?() }
         }
     }
 

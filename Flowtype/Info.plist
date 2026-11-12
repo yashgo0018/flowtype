@@ -24,7 +24,11 @@
 	<string>14.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Flowtype records microphone audio locally so it can transcribe your speech.</string>
-	<key>SUFeedURL</key>
+	<key>NSAudioCaptureUsageDescription</key>
+    <string>Flowtype transcribes audio from all apps locally during meeting capture. No screen video is captured.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Flowtype reads selected calendars to suggest or automatically start meeting transcription when you enable calendar integration. It does not change events.</string>
+    <key>SUFeedURL</key>
 	<string>https://github.com/yashgo0018/flowtype/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>VEagWL+PapW63eF5JLNq1h1/QBresH6fqeRT1cV4tK0=</string>

@@ -77,4 +77,62 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertEqual(settings.toggleShortcut, AppSettings.defaults.toggleShortcut)
         XCTAssertEqual(settings.pasteLastShortcut, "cmd+ctrl+v")
     }
+
+    func testMeetingShortcutIsAvailableWithoutChangingDictationDefaults() {
+        let settings = makeStore().load()
+
+        XCTAssertEqual(settings.shortcutBindings["Meeting capture"], "cmd+ctrl+m")
+        XCTAssertEqual(settings.toggleShortcut, "ctrl+option+space")
+        XCTAssertEqual(settings.pasteLastShortcut, "cmd+ctrl+v")
+    }
+
+    func testStoredMeetingShortcutIsCanonicalizedAndSurvivesSavingOtherSettings() {
+        defaults.set("control+command+shift+m", forKey: "meeting.shortcut")
+        let store = makeStore()
+        var settings = store.load()
+        XCTAssertEqual(settings.shortcutBindings["Meeting capture"], "cmd+ctrl+shift+m")
+
+        settings.playSounds = false
+        store.save(settings)
+        let reloaded = makeStore().load()
+
+        XCTAssertEqual(reloaded.shortcutBindings["Meeting capture"], "cmd+ctrl+shift+m")
+        XCTAssertEqual(defaults.string(forKey: "meeting.shortcut"), "cmd+ctrl+shift+m")
+        XCTAssertFalse(reloaded.playSounds)
+    }
+
+    func testMeetingShortcutConflictDisablesOnlyMeetingBinding() {
+        for existing in [AppSettings.defaults.toggleShortcut, AppSettings.defaults.pasteLastShortcut] {
+            defaults.set(existing, forKey: "meeting.shortcut")
+            let settings = makeStore().load()
+
+            XCTAssertNil(settings.shortcutBindings["Meeting capture"])
+            XCTAssertEqual(settings.toggleShortcut, AppSettings.defaults.toggleShortcut)
+            XCTAssertEqual(settings.pasteLastShortcut, AppSettings.defaults.pasteLastShortcut)
+            XCTAssertTrue(ShortcutParser.conflicts(settings.shortcutBindings).isEmpty)
+        }
+    }
+
+    func testDisabledOrInvalidMeetingShortcutStaysUnregisteredAfterSaving() {
+        for shortcut in ["", "cmd+fn", "fn+cmd", "banana"] {
+            defaults.set(shortcut, forKey: "meeting.shortcut")
+            let store = makeStore()
+            let settings = store.load()
+            XCTAssertNil(settings.shortcutBindings["Meeting capture"])
+
+            store.save(settings)
+
+            XCTAssertEqual(defaults.string(forKey: "meeting.shortcut"), "")
+            XCTAssertNil(makeStore().load().shortcutBindings["Meeting capture"])
+        }
+    }
+
+    func testMeetingDefaultCannotHijackAnExistingDictationBinding() {
+        defaults.set("control+command+m", forKey: "shortcut.toggle")
+        let settings = makeStore().load()
+
+        XCTAssertEqual(settings.toggleShortcut, "cmd+ctrl+m")
+        XCTAssertNil(settings.shortcutBindings["Meeting capture"])
+        XCTAssertTrue(ShortcutParser.conflicts(settings.shortcutBindings).isEmpty)
+    }
 }
