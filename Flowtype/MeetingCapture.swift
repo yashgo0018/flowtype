@@ -96,7 +96,7 @@ final class MeetingCapture: MeetingCapturing {
     nonisolated static func microphoneCallback(format: AVAudioFormat, queue: MeetingAudioQueue, origin: Double) throws -> AVAudioNodeTapBlock {
         let converter = try MeetingPCMConverter(format: format)
         return { @Sendable buffer, time in
-            let start = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) - origin : ProcessInfo.processInfo.systemUptime - origin
+            let start = Self.sessionStart(hostTime: time.isHostTimeValid ? time.hostTime : nil, origin: origin)
             converter.consume(buffer, source: .microphone, at: start, into: queue)
         }
     }
@@ -105,9 +105,14 @@ final class MeetingCapture: MeetingCapturing {
         let converter = try MeetingPCMConverter(format: format)
         return { @Sendable _, input, inputTime, _, _ in
             let stamp = inputTime.pointee
-            let start = stamp.mFlags.contains(.hostTimeValid) ? AVAudioTime.seconds(forHostTime: stamp.mHostTime) - origin : ProcessInfo.processInfo.systemUptime - origin
+            let start = Self.sessionStart(hostTime: stamp.mFlags.contains(.hostTimeValid) ? stamp.mHostTime : nil, origin: origin)
             converter.consume(input, source: .system, at: start, into: queue)
         }
+    }
+
+    nonisolated private static func sessionStart(hostTime: UInt64?, origin: Double) -> Double {
+        if let hostTime { return AVAudioTime.seconds(forHostTime: hostTime) - origin }
+        return ProcessInfo.processInfo.systemUptime - origin
     }
 
     private func observeHardware(_ object: AudioObjectID, selector: AudioObjectPropertySelector) {
